@@ -33,17 +33,19 @@ class Agent:
         self.pair = None
         self.path = []
         self.signal = None
+        self.goal = None
         self.initial_pair = None
         self.observation_index = 0
         self.learner.reset_episode()
 
     def observe(self, observation):
         self.signal = observation.token
+        self.goal = observation.goal
         self.observation_index += 1
-        self.pair = self.mappings.embed(observation.token, self._embedding_rng)
+        self.pair = self.mappings.embed(observation.token, self._embedding_rng, context=self.goal)
         self.initial_pair = self.pair
         self.path = [] if self.pair is None else [self.pair]
-        self.events.append(dict(kind='EMBED', observation=observation.token, pair=self.pair))
+        self.events.append(dict(kind='EMBED', observation=observation.token, goal=self.goal, pair=self.pair))
 
     def next_output(self):
         """Advance a stored edge before sampling an untyped output token."""
@@ -54,7 +56,7 @@ class Agent:
             return None
         self.pair = successor
         self.path.append(successor)
-        self.learner.encounter(successor, enabled=self.learning_enabled)
+        self.learner.encounter(successor, enabled=self.learning_enabled, context=self.goal)
         token = self.mappings.emit(successor, self._output_rng)
         self.events.append(dict(kind='OUTPUT', pair=successor, output=token))
         self.timestamp += 1
@@ -68,7 +70,7 @@ class Agent:
         self.learner.expire(transition.expired_expectations)
 
 
-def run_episode(agent, environment, *, start=None, learn=None):
+def run_episode(agent, environment, *, start=None, learn=None, goal=None):
     """Runner owns the environment; the agent sees symbols and explicit feedback.
 
     `learn=False` freezes both update rules for assessment. Existing lifetime
@@ -79,7 +81,7 @@ def run_episode(agent, environment, *, start=None, learn=None):
         agent.learning_enabled = learn
     try:
         agent.reset()
-        transition = environment.reset(start=start)
+        transition = environment.reset(start=start, **({} if goal is None else {"goal": goal}))
         transitions = [transition]
         while not transition.done:
             if transition.observation is not None:

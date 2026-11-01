@@ -1,0 +1,6 @@
+#!/usr/bin/env python3
+"""Open the frozen-animal playground, including from WSL on Windows."""
+from static_agent_training.play import main
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,44 @@
+{
+  "schema_version": "crt-benchmark-v1",
+  "seed": 20261101,
+  "episodes": 2000,
+  "generation": 20,
+  "genotype_id": "63d8a57d9fdf92a66273f8d4734360bdb9b96824a8463fd33616a6a1888e2735",
+  "task_source": "fresh draws from the saved held-out position partition; equal starts and goals excluded",
+  "random_policy": "uniform over nine movement buttons including zero; no expectations; same 12-move limit",
+  "exact_random_success": 0.11533329137348329,
+  "animal": {
+    "successes": 197,
+    "success_rate": 0.0985,
+    "interval95": [
+      0.08619980868374258,
+      0.11233958028310354
+    ],
+    "reasons": {
+      "target": 197,
+      "internal_limit": 383,
+      "action_limit": 743,
+      "out_of_bounds": 677
+    }
+  },
+  "random": {
+    "successes": 224,
+    "success_rate": 0.112,
+    "interval95": [
+      0.09891575901603857,
+      0.12657186967421372
+    ],
+    "reasons": {
+      "target": 224,
+      "action_limit": 1023,
+      "out_of_bounds": 753
+    }
+  },
+  "paired_difference": {
+    "percentage_points": -1.35,
+    "interval95": [
+      -3.077667722648062,
+      0.377667722648062
+    ]
+  }
+}

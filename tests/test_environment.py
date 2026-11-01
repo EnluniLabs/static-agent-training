@@ -52,7 +52,7 @@ class EnvironmentTests(unittest.TestCase):
         self.assertEqual(self.move(env, -1).feedback, ())
 
     def test_expiration_and_internal_limit(self):
-        env = NumberLine(internal_limit=2)
+        env = NumberLine(internal_limit=2, boundary_mode="terminate")
         env.reset(start=20)
         self.expect(env, 20)
         result = self.move(env, 1)

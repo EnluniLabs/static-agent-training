@@ -1,8 +1,35 @@
 # Static agent training
 
-Current milestone: a working lambda engine and training environment interface. See
-[ENVIRONMENT_INTERFACE.md](ENVIRONMENT_INTERFACE.md) for the contract and
-`static_agent_training/environment.py` for the independent number-line world.
+A lambda-repertoire evolutionary training system with local lifetime learning,
+replayable checkpoints, optional native CPU/CUDA evaluation, and a WSL/Windows
+browser playground.
+
+Start with `./train`, inspect background runs with `./train status`, and open the
+playground with `./demo`. The Python reference needs no third-party dependencies;
+optional acceleration setup is documented below. New-run defaults are uniform
+start/goal pairs, hard walls, and speciation disabled. A current number and target
+are separate inputs; the agent receives no computed distance or suggested move.
+
+Documentation:
+
+- [Implementation and experiment boundaries](docs/IMPLEMENTATION.md)
+- [Environment interface](ENVIRONMENT_INTERFACE.md)
+- [Experiment record and result snapshots](docs/EXPERIMENTS.md)
+- [Bias audit, attribution limits, and reproducible controls](docs/BIAS_AUDIT.md)
+- [Future work and hypotheses](FUTURE_WORK.md)
+
+Quick commands:
+
+```sh
+./train --population 1024 --generations 500 --backend native --batch-size 1024 --episodes 100 --assessment-episodes 200
+./train status --watch
+./demo
+```
+
+Install the optional native dependencies before the accelerated command, or use
+`--backend python` for the dependency-free reference. `./train` automatically uses
+`.venv/bin/python` when present. Training artifacts stay under ignored `runs/`;
+curated historical summaries are committed under `docs/results/`.
 
 An existing initializer creates the mathematical seeds of a set of explanations.
 Each seed is an ordered pair `(A, B)` of closed untyped lambda terms. Chain
@@ -34,7 +61,8 @@ implementation choice implementing the report's small-combinator bias.
 The engine develops multiple starting pairs with separate contraction budgets,
 stochastic reduction, and budget pooling at shared ordered pairs. Fixed-repertoire
 physical mappings, agent traversal, and local lifetime learning are implemented.
-Evolutionary mutation operators and the population training loop follow later.
+Inherited species state and offspring mutation are implemented. The population
+training loop and live terminal fitness graph are also implemented.
 
 The stochastic reducer is available as `static_agent_training.reduction.normalize`.
 It accepts a closed tuple AST, a beta-contraction budget, a seed, and an AST-size
@@ -116,7 +144,8 @@ To reconcile mappings after external redevelopment, call
 `InheritedMappings.initialize(new_repertoire, observations, outputs,
 previous=inherited, seed=...)`. Surviving pair IDs keep their inherited logits,
 new IDs receive seeded logits, and removed IDs disappear. Pass inherited weights,
-not learned lifetime weights. No mutation operators are implemented yet.
+not learned lifetime weights. The offspring builder below performs this
+reconciliation automatically.
 The repertoire, mapping, and lifetime-agent modules never import the reducer.
 
 
@@ -146,3 +175,458 @@ traversal paths, emission logit snapshots, timestamps, empirical loss and update
 expiration, compatibility checks, and local embedding conflicts linked to their
 preceding empirical revision. Neither update rule changes the fixed repertoire
 or inherited weights, or invokes lambda reduction.
+
+
+Mutation is implemented in `genome.py` and `mutation.py`. `Species` stores closed
+initial pairs, their individual development budgets, immutable inherited mapping
+weights, the fixed repertoire, development limits, and a saved development log.
+Species JSON and genotype IDs support replay; loading a species performs no
+lambda reduction.
+
+```python
+from static_agent_training.genome import develop
+from static_agent_training.mutation import mutate
+
+# pairs is a sequence of inherited (left_ast, right_ast) starting pairs.
+parent = develop(pairs, [s.token for s in env.observation_tokens],
+                 [o.token for o in env.output_tokens], budgets=64,
+                 development_seed=1, mapping_seed=2)
+child, mutation_log = mutate(parent, seed=3)
+# Training uses child.repertoire and child.inherited.lifetime().
+```
+
+The operator draws are independent. Defaults per offspring: weight perturbation
+0.8, subtree replacement 0.15, complete seed-term replacement 0.10, initial-pair
+insertion 0.05, and initial-pair deletion 0.05. Operators execute in that order
+except weight perturbation, which occurs last, after structural redevelopment and
+mapping reconciliation. Selected weight mutation adds independent Gaussian noise
+with standard deviation 0.1 to every embedding and output logit, including newly
+initialized entries. No crossover or intermediate-term mutations occur.
+
+Subtree replacements are generated in their actual binder context, preserving
+closedness and the configured whole-term depth and node limits (defaults 6 and
+31). New subtrees may refer to surrounding binders using De Bruijn indices;
+no existing subtree is moved between binder contexts. Operators retry up to 32
+times to obtain a different term, then log a no-op if impossible. Deletion leaves
+at least one initial pair. Inserted pairs receive a configurable fresh budget
+(default 64); other initial-pair budgets are retained.
+
+If the final starting pairs or budgets changed, the builder reruns the entire
+repertoire with fresh budgets and a recorded fresh development seed. This
+recomputes shared execution, including lost and new mergers. Otherwise the fixed
+repertoire is reused with no reduction. All surviving pair IDs retain their
+inherited weights before any selected weight noise; new IDs receive seeded
+weights and removed IDs lose theirs. Lifetime weights are never consulted.
+
+Each mutation log records parent and offspring genotype IDs, configuration,
+independent RNG stream seeds, selected operators, edits and no-ops, added/removed
+pair IDs, merger changes, and development contraction cost. Merger changes are
+compared by junction pair ID and the multiset of participating starting-pair IDs.
+A new development seed can change reduction costs and discovery in unedited
+chains as well as in the mutated chain; those execution changes are recorded.
+
+Save with `json.dump(parent.to_data(), file)`, and load using
+`Species.from_data(json.load(file))`. A saved species can also be mutated via:
+
+```sh
+python3 -m static_agent_training.mutation species.json --seed 3 --output offspring.json
+```
+
+The output bundle contains `species` and `mutation`; it can itself be passed as
+the input for the next mutation. Species construction and reproduction are
+separate from the lifetime agent. Population selection uses fitness tournaments. Optional structural speciation
+restricts parent tournaments to niches and shares fitness between their members;
+crossover is not performed.
+
+
+Start a new run with a live terminal graph using one command:
+
+```sh
+./train
+```
+
+The launcher defaults to 32 animals, 50 generations, and seed 42. Each run gets
+its own timestamped folder under `runs/`, so repeating the command never
+reuses a previous folder. Press Ctrl-C to stop. Resume the most recently
+checkpointed run with:
+
+```sh
+./train resume
+```
+
+You can also choose settings or a specific checkpoint:
+
+```sh
+./train --population 64 --generations 100
+./train resume runs/my-run --generations 100
+./train --help
+```
+
+The executable can be invoked by absolute path from any directory; relative
+run paths are resolved from the project root. The full experiment command
+remains available:
+
+Run a complete evolutionary experiment with a live terminal graph:
+
+```sh
+python3 -m static_agent_training.experiment --population 32 --generations 50 --seed 42 --output runs/first-run
+```
+
+The graph redraws in an interactive terminal while the current evaluation count
+and provisional fitness update. It plots population mean training success (`M`),
+best training success (`B`), and population mean frozen held-out success (`H`).
+An asterisk marks overlapping series. The vertical axis is explicitly labeled
+in percentages and auto-scales with a zero baseline to show small changes. All
+completed generations remain represented as the horizontal axis compresses to
+fit. Training starts change between generations, so scores can fluctuate.
+Outside an interactive terminal, or with `--no-live`, one summary line prints
+per completed generation without ANSI control sequences.
+
+Default settings are population 200, 500 generations, 20 lifetime episodes,
+20 frozen assessment episodes, five inherited elites, tournaments of size five,
+four starting pairs, and 64 contractions per initial pair. Small populations
+set the default elite count to `min(5, population - 1)`. All non-elite offspring
+are constructed through mutation; unchanged elites begin fresh lifetimes.
+Training fitness alone determines selection. Assessment never updates weights
+or influences parent choice. `--no-learning` disables both local learning rules
+for a baseline run. Episode counts, elite count, and tournament size are also
+configurable through the CLI; all nested development, mutation, and learning
+settings are available through `evolution.TrainingConfig` in Python.
+
+New runs vary both the starting number and target number. The agent receives
+those two displayed numbers separately (`obs_+12` and `goal_-3`, for example),
+and chooses movement outputs itself. It receives no relative distance, suggested
+move, or path. Separate learned embedding rows for the current number and target
+contribute additively to the entry-pair logits; this supplies task context without
+a hand-coded movement rule. There are 82 input symbols (41 current numbers and
+41 goals), and 50 outputs (nine moves and 41 next-number predictions).
+
+New varying-goal runs split all 41 positions, including zero, once using the run
+seed: 31 training positions and ten held-out positions. The default sampler
+chooses starts uniformly and goals uniformly from the other positions in the same
+partition. Every valid ordered pair therefore has equal probability, and every
+allowed goal has equal marginal probability. Training resamples each generation;
+assessment uses a fixed task list with disjoint start and goal values. All task
+lists and realized distances are recorded. The agent receives no computed distance.
+
+The physical world has hard walls at −20 and +20. An overshooting move stops at
+the boundary, still consumes a move, and produces an observation and prediction
+feedback at the actual bounded position. Reaching the supplied target within 12
+moves succeeds. There is no out-of-bounds failure under these new rules.
+
+Normal-distance sampling remains available with `--distance-distribution normal`.
+That sampler can expose central targets more often because there are more feasible
+approaches to them; uniform pairs equalize target exposure, not task difficulty.
+Use `--fixed-goal --distance-distribution uniform --boundary-mode terminate` for
+the original zero-target experiment. Older checkpoints retain their original task
+sampling, partitions, and boundary rules automatically when resumed.
+
+Separate seed streams drive population generation, development, initial weights,
+training starts, embedding sampling, output sampling, frozen assessment,
+tournament selection, and offspring mutation. Episode resets retain lifetime
+learning; assessment uses separate copies of learned weights and separate RNG
+streams. Reproduction always takes the immutable inherited genotype. The legacy
+`Species` class denotes one inherited genotype, not a cluster or speciation rule.
+
+Each run directory contains:
+
+- `config.json`: complete configuration and actual position partitions.
+- `generations/00000.json`, etc.: actual episode starts and order, per-animal
+  fitness, prediction statistics, failures, repertoire sizes, and reproduction
+  ancestry including mutation logs. Stored generation indices start at zero;
+  the terminal displays them starting at one.
+- `traces/00000-champion.json.gz`, etc.: detailed training and assessment events,
+  inherited genotype, and learned mappings of that generation's best training
+  animal. This is a generation champion, not a claim of improvement or correctness.
+- `checkpoint.json.gz`: the next inherited population, configuration, generation
+  index, and complete summary history. A next population is reproduced even at
+  the requested endpoint so extending the run follows the same sequence.
+
+A complete checkpoint is atomically replaced after every generation. Ctrl-C
+leaves the last complete checkpoint usable; a partially evaluated generation is
+rerun on resume. Resume or extend the same experiment with:
+
+```sh
+python3 -m static_agent_training.experiment --resume runs/first-run
+python3 -m static_agent_training.experiment --resume runs/first-run --generations 100
+```
+
+Resumption restores the recorded configuration; only the generation target and
+display mode may change. Seed streams are derived from saved experiment coordinates,
+so uninterrupted and resumed runs produce identical results. Output directories
+are never silently overwritten. Run artifacts under `runs/` are ignored by Git.
+
+Watch the best saved training performer in a browser:
+
+```sh
+python3 -m static_agent_training.demo runs/my-run
+```
+
+Open the printed `demo/index.html` path in a browser. The standalone replay has
+attempt selection, play/pause, step, speed, and a step slider. It shows the
+animal moving along the number line toward zero, decoded predictions, and the
+actual outcome of every held-out attempt, including failures. No server or
+additional dependencies are needed.
+
+Selection takes the highest training score among saved generation champions,
+with ties going to the earliest generation. The exporter restores that animal's
+saved learned weights and reproduces its original frozen assessment with the
+recorded RNG streams and episode order; learning remains disabled. It checks
+outcomes against the saved results. The accompanying `demo/champion.json`
+contains the inherited animal, learned mappings, assessment seed, encoding seed,
+and visual replay frames, so the selected performer can be kept separately from
+the training population. Exporting does not resume or modify training.
+
+
+Launch the interactive playground on Windows from WSL:
+
+```sh
+./demo
+# Or select a run / exported animal explicitly:
+./demo runs/my-run
+./demo runs/my-run/demo/champion.json
+```
+
+This starts a local server at `http://localhost:8765` and opens the Windows
+default browser using PowerShell when running in WSL. Choose your own start,
+goal, and sampling seed, then run an attempt. Play/pause, step, speed, and a slider
+control the animation. “Try again” changes the sampling seed. Training history
+is omitted. Every attempt uses fresh copies of the saved learned weights with
+learning disabled; the tester never trains or searches for a successful path.
+Use `--no-open` to suppress browser launch or `--port` to choose another port.
+Ctrl-C stops the server. Old zero-target animals cannot accept custom goals;
+train a new varying-goal run to use them.
+
+Compare a saved performer with uniform random movement on fresh held-out tasks:
+
+```sh
+python3 -m static_agent_training.benchmark runs/my-run --episodes 2000
+```
+
+Both policies receive the same ordered start/goal tasks and the same world
+boundaries and 12-move limit. The random policy samples uniformly from all nine
+movement buttons, including zero, and emits no predictions. The benchmark freezes
+the selected animal's learned weights, records every outcome, and reports success
+rates and 95% intervals. It also calculates the exact random success probability
+for the sampled tasks. The task values come from the saved held-out partition;
+these are fresh task draws, not a new partition. Results are saved to
+`demo/benchmark.json` and shown in the playground when that animal is loaded.
+The playground's Policy selector also lets you watch random movement on your
+own tasks. Every new training generation records exact random expectations for
+its training and assessment tasks alongside the animal scores; those expectations
+do not influence selection.
+
+A larger training session can be started with:
+
+```sh
+./train --population 64 --generations 150 --episodes 100 --assessment-episodes 100
+```
+
+Check background runs without finding log files:
+
+```sh
+./train status
+./train status --watch
+```
+
+`./status` and `./status --watch` are equivalent shortcuts. Status lists active
+runs first, then saved runs, with completed generations, percentage, latest
+training and held-out scores, the random baseline where available, elapsed time,
+and an estimated remaining time based on recent completed generations. Stopped
+runs are distinguished from completed runs using live process discovery. Watching
+status never starts or stops training; Ctrl-C only exits the status display.
+
+While the playground is running, open `http://localhost:8765/runs` for the same
+information in an automatically refreshing browser view. The playground links
+to this page and displays a compact summary of active background runs. Status
+refreshes every five seconds and reports completed generations; ongoing work
+within the next generation is reflected when that generation finishes.
+
+Optional acceleration preserves sequential lifetime learning while evaluating
+independent animals in parallel. Choose `--backend python` (the original
+reference), `--backend native` (compiled C++ with CPU workers), or `--backend cuda`
+(CUDA via CuPy). The default remains `python`. The launcher uses the project's
+`.venv/bin/python` when that environment exists.
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-accelerated.txt
+# For an NVIDIA GPU with a CUDA 13-compatible driver:
+.venv/bin/python -m pip install -r requirements-cuda.txt
+
+./train --backend native --workers 8 --batch-size 1024 --population 1024 --generations 150 --episodes 100 --assessment-episodes 100
+./train --backend cuda --batch-size 1024 --population 1024
+```
+
+The native backend needs `g++` with OpenMP support; compiled libraries are cached
+under `~/.cache/static-agent-training`. CUDA kernels use CuPy's compilation cache.
+The optional dependencies and CUDA compiler components are isolated in the virtual
+environment. An unavailable requested backend fails rather than silently falling
+back. The backend, worker count, and batch size are saved in the configuration and
+retained on resume. The status view identifies each run's backend.
+
+Both compiled paths use double precision, separate per-animal MT19937 streams
+initialized directly from the reference Python RNG states, fixed repertoire edges,
+sequential empirical updates, delayed compatibility correction, and the same
+world limits. No target distance or movement policy is inserted into evaluation.
+Inherited weights are copied before a lifetime; assessment uses the learned
+weights with further learning disabled. Each generation's training champion is
+rerun through the reference evaluator, its episode outcomes and statistics are
+checked against the accelerated result, and its full reference trace is saved for
+existing demo/export tools. Floating-point losses and learned logits can differ
+by small rounding amounts; sampled behavior is checked by tests, with the champion
+additionally checked during every accelerated generation.
+
+Measure throughput on this machine:
+
+```sh
+.venv/bin/python -m static_agent_training.speed --populations 64 256 1024 --episodes 50 --assessment-episodes 50 --repeats 3
+```
+
+This benchmarks whole generation evaluation, including batch packing, RNG setup,
+GPU transfers, metrics, and champion replay, after compilation warmup. It excludes
+population initialization, reproduction, and checkpoint writes from the timed
+samples (initialization time is recorded separately). The Python reference is
+measured only up to 64 animals by default; change `--python-limit` to measure
+larger populations. Genotypes are independently initialized with common seeds;
+results represent the initial population, and evolved populations may take longer.
+The JSON report includes all samples, medians, and resulting fitness summaries.
+CUDA is available as a backend, but the measured fastest backend should determine
+which one is used for a larger experiment.
+
+The playground's **Best candidate from run** selector loads the strongest saved
+training performer from a chosen run, including runs still in progress. Scores,
+generation, goal support, and the corresponding random comparison update for that
+candidate. Selection ranks saved generation champions by training success, with
+ties going to the earliest generation. **Refresh best** reloads the latest winner
+for the selected run and discovers new runs. Runs without a published champion
+are listed but unavailable until a generation has been saved.
+
+Each attempt includes the selected candidate's run and generation identifier, so
+new training results or selections in another browser tab cannot silently change
+the animal being tested. Candidate loading reads saved traces and learned weights
+without resuming training or rewriting its files. Large generation logs are scanned
+for their small summaries rather than decoded in full for run selection/status.
+
+
+Configure the trial-distance distribution for a new experiment:
+
+```sh
+./train --backend native --population 1024 --distance-mean 10 --distance-stddev 5
+```
+
+The optional `--distance-distribution normal` assigns each feasible nonzero integer
+distance `d` a probability proportional to `exp(-0.5 * ((d - mean) / stddev)**2)`.
+Weights are normalized over distances that can actually occur in the relevant
+position partition. Then a pair at the chosen distance is sampled uniformly.
+This avoids accidentally overweighting short distances just because more pairs
+realize them. Bounds and sparse held-out partitions truncate the distribution, so
+the realized mean and spread can differ from the configured center and scale.
+Both directions are equally likely when both orientations are feasible. Mean must
+be between 1 and 40 and standard deviation must be finite and positive.
+
+Training, frozen assessment, and fresh random-comparison benchmarks use the saved
+distribution settings. Assessment tasks stay fixed throughout a run; training
+resamples each generation. Every generation stores its actual training and
+assessment distances in `task_sampling`. Manual playground tasks still use the
+start and goal you enter. Use `--distance-distribution uniform` to retain the
+previous independent start/goal sampling. Older checkpoints automatically retain
+that uniform sampling and their original RNG streams when resumed; sampling
+settings cannot be changed on resume.
+
+
+Enable optional structural speciation for a training run:
+
+```sh
+./train --backend native --population 1024 --speciation
+# Tunable compatibility threshold and maximum niche count:
+./train --backend native --population 1024 --speciation --speciation-threshold 0.6 --max-species 16
+```
+
+Speciation is off by default, including for older checkpoints. This implementation
+groups lambda repertoires using a weighted Jaccard distance: 25% initial seed-pair
+IDs, 50% repertoire pair IDs, and 25% stored successor edges. Mapping weights do
+not affect membership. Compatible representatives retain persistent species IDs
+across generations and checkpoints. New incompatible structures create species
+until the configured cap is reached; excess unmatched candidates join the closest
+species, with those forced assignments recorded. The cap is also limited by the
+number of non-elite offspring slots.
+
+The global elite count, tournament size, mutation operators, and mutation seed
+coordinates match the control. Within a species, adjusted fitness divides each
+member's training fitness by species size, making the species' total shared
+fitness equal to its mean raw fitness. Each species reserves one mutated
+offspring; remaining offspring slots are allocated in proportion to shared fitness
+using deterministic largest-remainder rounding. All-zero fitness uses equal
+species allocation. Parent tournaments then run within each assigned species.
+With one species this reproduces the ordinary selection behavior. Assessment
+fitness never influences clustering, allocation, parent choice, or elite choice.
+
+This is a bounded structural-niche treatment for this project's lambda graphs,
+inspired by [explicit fitness sharing](https://www.cs.cmu.edu/afs/cs/project/jair/pub/volume21/stanley04a-html/node3.html),
+not a full NEAT implementation: it has no crossover, innovation-number machinery,
+or adaptive compatibility threshold. Generation records include membership,
+representatives, shared-fitness statistics, offspring quotas, new/extinct species,
+and forced assignments. Summaries report species sizes and unique structures;
+checkpoints preserve representative state for deterministic resume. The legacy
+`Species` Python class still denotes one inherited genotype, not a niche.
+
+Run a matched speciation/control benchmark:
+
+```sh
+./train compare
+# Smaller exploratory study:
+./train compare --population 256 --generations 8 --episodes 40 --assessment-episodes 80 --benchmark-episodes 1000
+# Resume an interrupted study without changing its saved settings:
+./train compare --resume runs/comparisons/my-study
+```
+
+Default comparison: seeds 42, 43, 44; 1,024 animals per arm; 30 generations;
+100 training and 200 assessment episodes per animal; native evaluation with eight
+workers per arm; uniform valid start/goal pairs and hard walls;
+2,000 final fresh held-out trials per arm. Both arms for a seed run concurrently,
+then the runner advances to the next seed. Each arm has its own ordinary run
+folder, checkpoint, trace files, and log. `runs/comparisons/<study>/manifest.json`
+records the complete study, and `report.json` is atomically refreshed throughout.
+A study lock prevents two controllers from resuming the same comparison together.
+Ctrl-C on the controller stops its active arms and leaves checkpoints resumable.
+
+The comparison verifies initial population hashes and task hashes for every
+paired generation. Both arms use the same population size, elite budget, learning,
+mutation settings, input partitions, ordered tasks, evaluation seeds, and generation
+budget; only the speciation switch differs. This compares equal evaluation budgets,
+not equal wall-clock time. The primary endpoint selects each run's highest-training
+saved champion without using assessment scores, then freezes its learned mappings
+and evaluates both candidates on fresh shared draws from the held-out partition.
+The random-movement baseline uses those same final tasks and is also recorded.
+Per-seed differences and their mean are reported, with a 95% t interval across
+paired seed differences; episodes are not treated as independent experimental
+seeds. With three seeds, results remain exploratory. A long-run result is reported
+only after the corresponding final evaluations are complete; live population
+comparisons use matching completed generations.
+
+Open `http://localhost:8765/comparisons` while the playground is running for live
+study progress, per-seed results, confidence intervals, and links to test each
+arm's best candidate. Training status and playground navigation link to this page.
+
+
+Live playground attempts always use hard walls for both the saved animal and
+random movement. The display identifies overshooting moves as stopping at a wall
+and shows the exact random success probability for the entered start and goal.
+Saved training/assessment scores and independent benchmark results retain the
+rules used when they were collected; the view identifies those original boundary
+rules. Faithful exported historical replays continue to reproduce their saved
+rules. New CPU/CUDA training and random baselines use the same hard-wall semantics.
+
+A controlled target-location diagnostic is available:
+
+```sh
+.venv/bin/python -m static_agent_training.goal_diagnostics runs/my-goal-aware-run
+```
+
+It freezes learned mappings, evaluates fixed distances 1, 5, and 10 for every
+feasible target, compares against exact random-movement probabilities, and repeats
+under the original and hard-wall rules. Rates are averaged per target so targets
+with two feasible approach directions do not receive extra weight. The JSON output
+also records expected target exposure from each candidate's original normal-distance
+training distribution. This diagnostic changes no training state.

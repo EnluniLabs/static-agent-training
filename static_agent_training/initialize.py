@@ -80,9 +80,9 @@ K = ("abs", ("abs", ("var", 1)))
 S = ("abs", ("abs", ("abs", ("app", ("app", ("var", 2), ("var", 0)), ("app", ("var", 1), ("var", 0))))))
 
 
-def generate_term(rng, config):
+def generate_term(rng, config, *, binders=0):
     library = [t for t in (I, K, S) if depth(t) <= config.max_depth and node_count(t) <= config.max_nodes]
-    if rng.random() < config.combinator_probability:
+    if library and rng.random() < config.combinator_probability:
         return rng.choice(library)
 
     def build(binders, levels, nodes):
@@ -101,7 +101,7 @@ def generate_term(rng, config):
         left_nodes = rng.randint(minimum, nodes - 1 - minimum)
         return ("app", build(binders, levels - 1, left_nodes), build(binders, levels - 1, nodes - 1 - left_nodes))
 
-    return build(0, config.max_depth, config.max_nodes)
+    return build(binders, config.max_depth, config.max_nodes)
 
 
 def initialize(config):

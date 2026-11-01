@@ -144,7 +144,8 @@ class LearningTests(unittest.TestCase):
         plus5 = next(k for k, v in diag['move_decoding'].items() if v == 5)
         force(self.maps.output[self.next], plus5)
         before = snapshot(self.maps)
-        # Freeze structural checks to isolate the terminal expiration convention.
+        # Freeze structural checks to isolate the legacy terminal expiration convention.
+        self.env.boundary_mode = "terminate"
         run_episode(self.agent, self.env, start=20, learn=False)
         self.assertEqual(before, snapshot(self.maps))
         self.assertEqual(self.agent.events[-1]['kind'], 'EXPIRED')

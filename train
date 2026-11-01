@@ -1,0 +1,8 @@
+#!/usr/bin/env python3
+"""Start training from the project directory with a single command."""
+from pathlib import Path
+
+from static_agent_training.launcher import main
+
+if __name__ == '__main__':
+    main(Path(__file__).resolve().parent)

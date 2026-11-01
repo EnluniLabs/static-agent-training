@@ -92,7 +92,7 @@ class LocalLearning:
             record = self.pending.pop(identity)
             self.events.append(dict(kind='EXPIRED', expectation_id=identity, pair=record.source))
 
-    def encounter(self, pair, *, enabled=True):
+    def encounter(self, pair, *, enabled=True, context=None):
         if not enabled or pair not in self.revised or not self.expectations:
             return
         successor = self.repertoire.successors.get(pair)
@@ -101,7 +101,7 @@ class LocalLearning:
         row = self.mappings.output[pair]
         token = max(self.expectations, key=lambda o: row[o])
         signal = self.signals[token]
-        probability = self.mappings.embedding_probabilities(signal)[self.mappings.pair_ids.index(successor)]
+        probability = self.mappings.embedding_probabilities(signal, context)[self.mappings.pair_ids.index(successor)]
         details = dict(pair=pair, signal=signal, successor=successor,
                        probability=probability, threshold=self.config.compatibility_threshold,
                        revision_event=self.revised[pair])

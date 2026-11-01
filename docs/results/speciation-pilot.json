@@ -1,0 +1,496 @@
+{
+  "arms": [
+    {
+      "completed": 8,
+      "final_benchmark": {
+        "animal": {
+          "interval95": [
+            0.10592623063520473,
+            0.14694383822896162
+          ],
+          "reasons": {
+            "action_limit": 296,
+            "internal_limit": 304,
+            "out_of_bounds": 275,
+            "target": 125
+          },
+          "success_rate": 0.125,
+          "successes": 125
+        },
+        "episodes": 1000,
+        "exact_random_success": 0.17684474126147587,
+        "generation": 2,
+        "random": {
+          "interval95": [
+            0.13952453255948705,
+            0.18507000969371934
+          ],
+          "reasons": {
+            "action_limit": 525,
+            "out_of_bounds": 314,
+            "target": 161
+          },
+          "success_rate": 0.161,
+          "successes": 161
+        }
+      },
+      "latest": {
+        "assessment_mean": 0.148681640625,
+        "best": 0.3,
+        "champion_assessment": 0.15,
+        "conflicts": 42240,
+        "expectations": 327448,
+        "generation": 7,
+        "mean": 0.13359375,
+        "mean_repertoire": 10.4453125,
+        "population_id": "697aee28bb31f1de9aa9157a9bd30e12cbb6b22ccee75798f11592cc23c6ce1a",
+        "prediction_accuracy": 0.024982571585598412,
+        "random_assessment": 0.18578852488474584,
+        "random_training": 0.177012879702875,
+        "species_count": 1,
+        "species_sizes": [
+          256
+        ],
+        "task_id": "3c9c7bd0e9df9172aef8a30480d13099ced16d94ec99e37eaaf119227c473d00",
+        "tested": 271109,
+        "unique_genotypes": 247,
+        "unique_structures": 136
+      },
+      "returncode": 0,
+      "run_name": "speciation-pilot-20261101-123417-s42-control",
+      "seed": 42,
+      "speciation": false,
+      "state": "completed",
+      "target": 8
+    },
+    {
+      "completed": 8,
+      "final_benchmark": {
+        "animal": {
+          "interval95": [
+            0.10963544529450506,
+            0.1512040095017769
+          ],
+          "reasons": {
+            "action_limit": 284,
+            "internal_limit": 316,
+            "out_of_bounds": 271,
+            "target": 129
+          },
+          "success_rate": 0.129,
+          "successes": 129
+        },
+        "episodes": 1000,
+        "exact_random_success": 0.17684474126147587,
+        "generation": 2,
+        "random": {
+          "interval95": [
+            0.13952453255948705,
+            0.18507000969371934
+          ],
+          "reasons": {
+            "action_limit": 525,
+            "out_of_bounds": 314,
+            "target": 161
+          },
+          "success_rate": 0.161,
+          "successes": 161
+        }
+      },
+      "latest": {
+        "assessment_mean": 0.1384765625,
+        "best": 0.3,
+        "champion_assessment": 0.1,
+        "conflicts": 80494,
+        "expectations": 324367,
+        "generation": 7,
+        "mean": 0.13349609375,
+        "mean_repertoire": 14.4296875,
+        "population_id": "f28920fee4f1304ea05f64bfb4f954c5e6d07034190611cc936e4c4536a6417f",
+        "prediction_accuracy": 0.025207217271667373,
+        "random_assessment": 0.18578852488474584,
+        "random_training": 0.177012879702875,
+        "species_count": 16,
+        "species_sizes": [
+          11,
+          15,
+          7,
+          13,
+          17,
+          16,
+          18,
+          16,
+          14,
+          14,
+          32,
+          15,
+          17,
+          17,
+          19,
+          15
+        ],
+        "task_id": "3c9c7bd0e9df9172aef8a30480d13099ced16d94ec99e37eaaf119227c473d00",
+        "tested": 266749,
+        "unique_genotypes": 244,
+        "unique_structures": 127
+      },
+      "returncode": 0,
+      "run_name": "speciation-pilot-20261101-123417-s42-speciation",
+      "seed": 42,
+      "speciation": true,
+      "state": "completed",
+      "target": 8
+    },
+    {
+      "completed": 8,
+      "final_benchmark": {
+        "animal": {
+          "interval95": [
+            0.1124216361480769,
+            0.15439485809729173
+          ],
+          "reasons": {
+            "action_limit": 314,
+            "internal_limit": 294,
+            "out_of_bounds": 260,
+            "target": 132
+          },
+          "success_rate": 0.132,
+          "successes": 132
+        },
+        "episodes": 1000,
+        "exact_random_success": 0.1605074496785914,
+        "generation": 5,
+        "random": {
+          "interval95": [
+            0.13295625717450094,
+            0.17769185969750323
+          ],
+          "reasons": {
+            "action_limit": 514,
+            "out_of_bounds": 332,
+            "target": 154
+          },
+          "success_rate": 0.154,
+          "successes": 154
+        }
+      },
+      "latest": {
+        "assessment_mean": 0.126416015625,
+        "best": 0.25,
+        "champion_assessment": 0.1,
+        "conflicts": 76146,
+        "expectations": 339241,
+        "generation": 7,
+        "mean": 0.1087890625,
+        "mean_repertoire": 13.6796875,
+        "population_id": "072f6672ca4b21bb2c58db3d9f36e265126fe45e0a06ace00b5e72e48e44a140",
+        "prediction_accuracy": 0.024173064504556217,
+        "random_assessment": 0.1623595444838852,
+        "random_training": 0.14795359953547607,
+        "species_count": 1,
+        "species_sizes": [
+          256
+        ],
+        "task_id": "df2cff6319c5388c7f68983e0880b52848a02ccb69b921bd6fc7fb3f79da2e9e",
+        "tested": 278740,
+        "unique_genotypes": 249,
+        "unique_structures": 129
+      },
+      "returncode": 0,
+      "run_name": "speciation-pilot-20261101-123417-s43-control",
+      "seed": 43,
+      "speciation": false,
+      "state": "completed",
+      "target": 8
+    },
+    {
+      "completed": 8,
+      "final_benchmark": {
+        "animal": {
+          "interval95": [
+            0.10963544529450506,
+            0.1512040095017769
+          ],
+          "reasons": {
+            "action_limit": 243,
+            "internal_limit": 322,
+            "out_of_bounds": 306,
+            "target": 129
+          },
+          "success_rate": 0.129,
+          "successes": 129
+        },
+        "episodes": 1000,
+        "exact_random_success": 0.1605074496785914,
+        "generation": 5,
+        "random": {
+          "interval95": [
+            0.13295625717450094,
+            0.17769185969750323
+          ],
+          "reasons": {
+            "action_limit": 514,
+            "out_of_bounds": 332,
+            "target": 154
+          },
+          "success_rate": 0.154,
+          "successes": 154
+        }
+      },
+      "latest": {
+        "assessment_mean": 0.1216796875,
+        "best": 0.225,
+        "champion_assessment": 0.15,
+        "conflicts": 55700,
+        "expectations": 329689,
+        "generation": 7,
+        "mean": 0.10595703125,
+        "mean_repertoire": 12.171875,
+        "population_id": "d06666ef2911045c098e2ca317eca856b1d1e06510e66196d6a775101e2783c2",
+        "prediction_accuracy": 0.025434805952685113,
+        "random_assessment": 0.1623595444838852,
+        "random_training": 0.14795359953547607,
+        "species_count": 16,
+        "species_sizes": [
+          5,
+          18,
+          18,
+          19,
+          18,
+          16,
+          13,
+          14,
+          15,
+          16,
+          20,
+          17,
+          17,
+          19,
+          16,
+          15
+        ],
+        "task_id": "df2cff6319c5388c7f68983e0880b52848a02ccb69b921bd6fc7fb3f79da2e9e",
+        "tested": 270063,
+        "unique_genotypes": 248,
+        "unique_structures": 132
+      },
+      "returncode": 0,
+      "run_name": "speciation-pilot-20261101-123417-s43-speciation",
+      "seed": 43,
+      "speciation": true,
+      "state": "completed",
+      "target": 8
+    },
+    {
+      "completed": 8,
+      "final_benchmark": {
+        "animal": {
+          "interval95": [
+            0.1161420645496615,
+            0.15864381562782268
+          ],
+          "reasons": {
+            "action_limit": 279,
+            "internal_limit": 320,
+            "out_of_bounds": 265,
+            "target": 136
+          },
+          "success_rate": 0.136,
+          "successes": 136
+        },
+        "episodes": 1000,
+        "exact_random_success": 0.17737699596837017,
+        "generation": 1,
+        "random": {
+          "interval95": [
+            0.14987640210972414,
+            0.19663395145680002
+          ],
+          "reasons": {
+            "action_limit": 480,
+            "out_of_bounds": 348,
+            "target": 172
+          },
+          "success_rate": 0.172,
+          "successes": 172
+        }
+      },
+      "latest": {
+        "assessment_mean": 0.146875,
+        "best": 0.25,
+        "champion_assessment": 0.1375,
+        "conflicts": 77726,
+        "expectations": 342929,
+        "generation": 7,
+        "mean": 0.12861328125,
+        "mean_repertoire": 13.57421875,
+        "population_id": "8700943673b9f8fc185df75a27a3941c6a96f871288583943db3b3b317e54f92",
+        "prediction_accuracy": 0.024728710457977136,
+        "random_assessment": 0.18926079993038708,
+        "random_training": 0.17300267645851214,
+        "species_count": 1,
+        "species_sizes": [
+          256
+        ],
+        "task_id": "c6eb5e3bcf4ade7e0e555b4e24f0e1e25b12370176fdbfd6f963ee575f6d42b6",
+        "tested": 282263,
+        "unique_genotypes": 247,
+        "unique_structures": 128
+      },
+      "returncode": 0,
+      "run_name": "speciation-pilot-20261101-123417-s44-control",
+      "seed": 44,
+      "speciation": false,
+      "state": "completed",
+      "target": 8
+    },
+    {
+      "completed": 8,
+      "final_benchmark": {
+        "animal": {
+          "interval95": [
+            0.1161420645496615,
+            0.15864381562782268
+          ],
+          "reasons": {
+            "action_limit": 279,
+            "internal_limit": 320,
+            "out_of_bounds": 265,
+            "target": 136
+          },
+          "success_rate": 0.136,
+          "successes": 136
+        },
+        "episodes": 1000,
+        "exact_random_success": 0.17737699596837017,
+        "generation": 1,
+        "random": {
+          "interval95": [
+            0.14987640210972414,
+            0.19663395145680002
+          ],
+          "reasons": {
+            "action_limit": 480,
+            "out_of_bounds": 348,
+            "target": 172
+          },
+          "success_rate": 0.172,
+          "successes": 172
+        }
+      },
+      "latest": {
+        "assessment_mean": 0.143603515625,
+        "best": 0.275,
+        "champion_assessment": 0.0625,
+        "conflicts": 79003,
+        "expectations": 327723,
+        "generation": 7,
+        "mean": 0.12626953125,
+        "mean_repertoire": 14.27734375,
+        "population_id": "258df5dea43959d6b1fef8e124ca0ae4d4b8913b3fcaa318f883fb515c729a6e",
+        "prediction_accuracy": 0.024843339472523727,
+        "random_assessment": 0.18926079993038708,
+        "random_training": 0.17300267645851214,
+        "species_count": 16,
+        "species_sizes": [
+          9,
+          10,
+          13,
+          13,
+          19,
+          12,
+          17,
+          16,
+          19,
+          17,
+          15,
+          15,
+          18,
+          20,
+          20,
+          23
+        ],
+        "task_id": "c6eb5e3bcf4ade7e0e555b4e24f0e1e25b12370176fdbfd6f963ee575f6d42b6",
+        "tested": 269851,
+        "unique_genotypes": 247,
+        "unique_structures": 130
+      },
+      "returncode": 0,
+      "run_name": "speciation-pilot-20261101-123417-s44-speciation",
+      "seed": 44,
+      "speciation": true,
+      "state": "completed",
+      "target": 8
+    }
+  ],
+  "assessment_episodes": 80,
+  "benchmark_episodes": 1000,
+  "distance_distribution": "normal",
+  "distance_mean": 10,
+  "distance_stddev": 5,
+  "episodes": 40,
+  "generations": 8,
+  "max_species": 16,
+  "name": "speciation-pilot-20261101-123417",
+  "paired_effect": {
+    "interval95": [
+      -0.8390767446371392,
+      0.9057434113038058
+    ],
+    "mean_percentage_points": 0.03333333333333337,
+    "seeds": 3
+  },
+  "pairs": [
+    {
+      "common_generations": 8,
+      "control": 0.125,
+      "difference_percentage_points": 0.40000000000000036,
+      "initialization_verified": true,
+      "matched_window_population_heldout": {
+        "control": 0.1447265625,
+        "speciation": 0.13814453125
+      },
+      "seed": 42,
+      "speciation": 0.129,
+      "tasks_verified": true
+    },
+    {
+      "common_generations": 8,
+      "control": 0.132,
+      "difference_percentage_points": -0.30000000000000027,
+      "initialization_verified": true,
+      "matched_window_population_heldout": {
+        "control": 0.121943359375,
+        "speciation": 0.1182421875
+      },
+      "seed": 43,
+      "speciation": 0.129,
+      "tasks_verified": true
+    },
+    {
+      "common_generations": 8,
+      "control": 0.136,
+      "difference_percentage_points": 0.0,
+      "initialization_verified": true,
+      "matched_window_population_heldout": {
+        "control": 0.14423828125000002,
+        "speciation": 0.135595703125
+      },
+      "seed": 44,
+      "speciation": 0.136,
+      "tasks_verified": true
+    }
+  ],
+  "population": 256,
+  "primary_endpoint": "success of the highest-training saved champion on fresh shared held-out tasks, with learned weights frozen",
+  "schema_version": "crt-speciation-comparison-v1",
+  "seeds": [
+    42,
+    43,
+    44
+  ],
+  "speciation_threshold": 0.6,
+  "status": "completed",
+  "updated": 1793558233.6405406
+}

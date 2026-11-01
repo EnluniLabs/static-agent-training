@@ -84,6 +84,16 @@ class InheritedMappings:
         output = {q: {o: value('output', q, o) for o in outputs} for q in ids}
         return cls(observations, outputs, ids, embedding, output)
 
+    def to_data(self):
+        return dict(observations=self.observations, outputs=self.outputs,
+                    pair_ids=self.pair_ids,
+                    embedding={s: dict(row) for s, row in self.embedding.items()},
+                    output={q: dict(row) for q, row in self.output.items()})
+
+    @classmethod
+    def from_data(cls, data):
+        return cls(**data)
+
     def lifetime(self):
         return LifetimeMappings(self)
 
@@ -98,14 +108,16 @@ class LifetimeMappings:
         self.embedding = {s: dict(row) for s, row in inherited.embedding.items()}
         self.output = {q: dict(row) for q, row in inherited.output.items()}
 
-    def embedding_probabilities(self, observation):
-        return softmax(self.embedding[observation][q] for q in self.pair_ids)
+    def embedding_probabilities(self, observation, context=None):
+        return softmax(self.embedding[observation][q] +
+                       (self.embedding[context][q] if context is not None else 0)
+                       for q in self.pair_ids)
 
     def output_probabilities(self, pair):
         return softmax(self.output[pair][o] for o in self.outputs)
 
-    def embed(self, observation, rng):
-        return sample(self.pair_ids, self.embedding_probabilities(observation), rng)
+    def embed(self, observation, rng, context=None):
+        return sample(self.pair_ids, self.embedding_probabilities(observation, context), rng)
 
     def emit(self, pair, rng):
         return sample(self.outputs, self.output_probabilities(pair), rng)

@@ -1,0 +1,186 @@
+{
+  "seed": 42,
+  "episodes": 50,
+  "assessment_episodes": 50,
+  "workers": 8,
+  "batch_size": 1024,
+  "initialization_seconds": 14.720614527002908,
+  "scope": "whole generation evaluation including packing, reference RNG generation, transfers, and champion replay; excludes reproduction and checkpoint writes; warm compilation",
+  "measurements": [
+    {
+      "population": 64,
+      "backend": "python",
+      "seconds": [
+        3.90435805299785,
+        3.9033352389960783,
+        3.9154093569959514
+      ],
+      "median_seconds": 3.90435805299785,
+      "summary": {
+        "generation": 0,
+        "mean": 0.055,
+        "best": 0.2,
+        "assessment_mean": 0.0384375,
+        "random_training": 0.12935543201912153,
+        "random_assessment": 0.1091877777084217,
+        "champion_assessment": 0.14,
+        "unique_genotypes": 64,
+        "mean_repertoire": 14.328125,
+        "expectations": 48531,
+        "tested": 37754,
+        "conflicts": 13535,
+        "prediction_accuracy": 0.025268845685225406
+      }
+    },
+    {
+      "population": 64,
+      "backend": "native",
+      "seconds": [
+        0.21064174101047684,
+        0.2049346690037055,
+        0.2022519519960042
+      ],
+      "median_seconds": 0.2049346690037055,
+      "summary": {
+        "generation": 0,
+        "mean": 0.055,
+        "best": 0.2,
+        "assessment_mean": 0.0384375,
+        "random_training": 0.12935543201912153,
+        "random_assessment": 0.1091877777084217,
+        "champion_assessment": 0.14,
+        "unique_genotypes": 64,
+        "mean_repertoire": 14.328125,
+        "expectations": 48531,
+        "tested": 37754,
+        "conflicts": 13535,
+        "prediction_accuracy": 0.025268845685225406
+      }
+    },
+    {
+      "population": 64,
+      "backend": "cuda",
+      "seconds": [
+        1.0895643589901738,
+        0.7889698619983392,
+        0.7886653620080324
+      ],
+      "median_seconds": 0.7889698619983392,
+      "summary": {
+        "generation": 0,
+        "mean": 0.055,
+        "best": 0.2,
+        "assessment_mean": 0.0384375,
+        "random_training": 0.12935543201912153,
+        "random_assessment": 0.1091877777084217,
+        "champion_assessment": 0.14,
+        "unique_genotypes": 64,
+        "mean_repertoire": 14.328125,
+        "expectations": 48531,
+        "tested": 37754,
+        "conflicts": 13535,
+        "prediction_accuracy": 0.025268845685225406
+      }
+    },
+    {
+      "population": 256,
+      "backend": "native",
+      "seconds": [
+        0.6726844160002656,
+        0.45706217001134064,
+        0.4636720470007276
+      ],
+      "median_seconds": 0.4636720470007276,
+      "summary": {
+        "generation": 0,
+        "mean": 0.0525,
+        "best": 0.2,
+        "assessment_mean": 0.041015625,
+        "random_training": 0.12935543201912153,
+        "random_assessment": 0.1091877777084217,
+        "champion_assessment": 0.14,
+        "unique_genotypes": 256,
+        "mean_repertoire": 14.63671875,
+        "expectations": 194328,
+        "tested": 149891,
+        "conflicts": 55955,
+        "prediction_accuracy": 0.025338412579807994
+      }
+    },
+    {
+      "population": 256,
+      "backend": "cuda",
+      "seconds": [
+        1.826513498002896,
+        1.0873260670050513,
+        1.0952456170052756
+      ],
+      "median_seconds": 1.0952456170052756,
+      "summary": {
+        "generation": 0,
+        "mean": 0.0525,
+        "best": 0.2,
+        "assessment_mean": 0.041015625,
+        "random_training": 0.12935543201912153,
+        "random_assessment": 0.1091877777084217,
+        "champion_assessment": 0.14,
+        "unique_genotypes": 256,
+        "mean_repertoire": 14.63671875,
+        "expectations": 194328,
+        "tested": 149891,
+        "conflicts": 55955,
+        "prediction_accuracy": 0.025338412579807994
+      }
+    },
+    {
+      "population": 1024,
+      "backend": "native",
+      "seconds": [
+        1.4473042000026908,
+        1.4593488529935712,
+        1.4068517199921189
+      ],
+      "median_seconds": 1.4473042000026908,
+      "summary": {
+        "generation": 0,
+        "mean": 0.04845703125,
+        "best": 0.2,
+        "assessment_mean": 0.03939453125,
+        "random_training": 0.12935543201912153,
+        "random_assessment": 0.1091877777084217,
+        "champion_assessment": 0.14,
+        "unique_genotypes": 1024,
+        "mean_repertoire": 14.34375,
+        "expectations": 767558,
+        "tested": 590110,
+        "conflicts": 207962,
+        "prediction_accuracy": 0.024619138804629646
+      }
+    },
+    {
+      "population": 1024,
+      "backend": "cuda",
+      "seconds": [
+        2.3432172640023055,
+        2.0140402350079967,
+        1.9791872130008414
+      ],
+      "median_seconds": 2.0140402350079967,
+      "summary": {
+        "generation": 0,
+        "mean": 0.04845703125,
+        "best": 0.2,
+        "assessment_mean": 0.03939453125,
+        "random_training": 0.12935543201912153,
+        "random_assessment": 0.1091877777084217,
+        "champion_assessment": 0.14,
+        "unique_genotypes": 1024,
+        "mean_repertoire": 14.34375,
+        "expectations": 767558,
+        "tested": 590110,
+        "conflicts": 207962,
+        "prediction_accuracy": 0.024619138804629646
+      }
+    }
+  ]
+}

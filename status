@@ -1,0 +1,6 @@
+#!/usr/bin/env python3
+"""Show background training progress from any working directory."""
+from static_agent_training.status import main
+
+if __name__ == '__main__':
+    main()
