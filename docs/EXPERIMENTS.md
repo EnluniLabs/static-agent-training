@@ -107,14 +107,78 @@ Sampling distance normally does not imply equal target exposure. New defaults
 therefore use uniform valid start/goal pairs and hard walls, including zero in the
 varying-goal partition. [Diagnostic data](results/target-location-diagnostic.json).
 
-## Current long run and bias audit
+## Stopped long run and bias audit
 
-The current run was launched with 1,024 animals, a 500-generation target, 100
+The earlier long run was launched with 1,024 animals, a 500-generation target, 100
 training and 200 frozen assessment episodes, seed 42, native CPU evaluation,
-uniform pairs, zero included, hard walls, and speciation off. It continues in the
-background; the notes below are snapshots, not its final result.
+uniform pairs, zero included, hard walls, and speciation off. It was stopped at generation 446/500; its checkpoint remains resumable.
+The audit notes are snapshots, not a completed 500-generation result.
 
 The [bias audit](BIAS_AUDIT.md) records the generation-88 baseline comparison and
 a later read-only goal-input control. Neither establishes that local gradient
-descent caused the population's improvement. The full matched lifetime-learning
-on/off study remains [future work](../FUTURE_WORK.md).
+descent caused the population's improvement. The matched lifetime-learning
+studies below address that question; deployment adaptation remains
+[future work](../FUTURE_WORK.md).
+
+
+## Lifetime learning on/off study (stopped)
+
+`lifetime-learning-20261101-153325` was launched after stopping the 1,024-animal
+long run gracefully at generation 446/500. The saved checkpoint remains resumable.
+The new study uses 256 animals per arm, 20 generations, seeds 42/43/44, 100 training
+and 200 assessment episodes, and 2,000 fresh shared held-out trials per selected
+candidate. Both arms use uniform pairs, hard walls, zero included, and no speciation.
+
+The control disables both existing lifetime update rules; the treatment enables
+both without changing their formulas. Assessment is frozen in both arms. Input
+and initial-population hashes are checked as in the speciation studies. This is a
+comparison of evolutionary runs with/without lifetime learning, not a same-genotype
+instantaneous ablation and not a test of a new error-function implementation.
+The live report is under `runs/comparisons/lifetime-learning-20261101-153325/` and
+visible at `/comparisons`. The user stopped this study before all seeds completed; no aggregate conclusion is claimed.
+
+
+## Inherited lifetime learning study (completed)
+
+`inherited-learning-20261101-154322` used the same small configuration above, with lifetime
+learning on in both arms and inherited learned weights off/on. Speciation remains
+off. Only end-of-training embedding and output logits enter reproductive parents;
+assessment is frozen and does not influence inheritance or selection. Elites also
+receive learned weights in the inheritance arm. Initial population and task hashes
+are checked, with evaluated/reproductive parent identities recorded. This tests
+inheritance without changing the existing error rules. All three seeds completed;
+see the [curated result](results/inherited-learning-pilot.json) and summary below.
+
+
+## Longer inherited lifetime learning benchmark (stopped)
+
+The 20-generation pilot completed across all three seeds. Inheritance on improved
+fresh held-out success by a mean 1.12 percentage points, with a seed-paired 95%
+interval of [-2.63, +4.86] points; this is not conclusive evidence of a benefit.
+
+A fresh rerun, `inherited-learning-long-20261101-155447`, targeted 200 generations per arm
+(ten times the pilot). It retains 256 animals, seeds 42/43/44, 100 training and
+200 frozen assessment episodes, 2,000 final shared held-out trials, native CPU
+evaluation with four workers per arm, uniform pairs, hard walls, lifetime learning
+on, and speciation off. Only learned-weight inheritance differs between arms.
+The pilot is preserved separately; this rerun starts from the same seeded initial
+populations rather than selecting a pilot winner. No learning or mutation rules
+were changed. The user stopped this study after seed 42 completed and seed 43
+reached four generations per arm; seed 44 had not started. Seed 42 alone favored
+inheritance off by 4.10 percentage points on the final endpoint. One completed
+seed pair does not establish a general effect.
+
+
+## Longer lifetime learning on/off benchmark
+
+At the user’s request, the longer inheritance comparison was stopped before all
+three seeds completed; its partial results do not establish an aggregate winner.
+A fresh study, `lifetime-learning-long-20261101-161824`, compares lifetime learning
+off/on during evolution for 200 generations, with learned-weight inheritance and
+speciation disabled in both arms. It retains 256 animals per arm, seeds 42/43/44,
+100 training and 200 frozen assessment episodes, 2,000 final shared held-out
+trials, uniform pairs, hard walls, and native CPU evaluation (four workers per arm).
+Both existing local update rules are disabled/enabled together; their formulas
+are unchanged. Final assessment freezes weights in both arms. This study tests
+learning during evolution; deployment-time adaptation remains a separate future
+test. Results are pending in `/comparisons`; no final winner is claimed.

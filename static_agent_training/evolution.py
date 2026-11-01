@@ -9,7 +9,7 @@ import json
 from .environment import NumberLine, POSITIONS, sample_starts
 from .evaluation import evaluate
 from .baseline import random_task_mean
-from .genome import DevelopmentConfig, develop
+from .genome import DevelopmentConfig, develop, inherit_lifetime_mappings
 from .initialize import Config, initialize
 from .learning import LearningConfig
 from .mutation import MutationConfig, mutate
@@ -30,6 +30,7 @@ class TrainingConfig:
     chain_budget: int = 64
     encoding_seed: int = 0
     learning: bool = True
+    inherit_lifetime: bool = False
     varying_goals: bool = True
     backend: str = "python"
     workers: int = 8
@@ -52,6 +53,8 @@ class TrainingConfig:
             value = getattr(self, name)
             if type(value) is not int or value < 1:
                 raise ValueError(f'{name} must be a positive integer')
+        if type(self.inherit_lifetime) is not bool:
+            raise ValueError("inherit_lifetime must be a boolean")
         if type(self.speciation) is not bool:
             raise ValueError('speciation must be a boolean')
         if not math.isfinite(self.speciation_threshold) or not 0 <= self.speciation_threshold <= 1:
@@ -149,22 +152,35 @@ def generation_tasks(config, generation, split):
     return training_starts, assessment_starts, training_goals, assessment_goals
 
 
-def evaluate_generation(population, config, generation, split, progress=None):
+def evaluate_generation(population, config, generation, split, progress=None, *, return_lifetime=False):
     training_starts, assessment_starts, training_goals, assessment_goals = generation_tasks(config, generation, split)
     random_training = random_task_mean(training_starts, training_goals, boundary_mode=config.boundary_mode)
     random_assessment = random_task_mean(assessment_starts, assessment_goals, boundary_mode=config.boundary_mode)
+    lifetime_population=[] if config.inherit_lifetime else None
     accelerated_results = None
     if config.backend != 'python':
         from .accelerated import evaluate_batch
         accelerated_results = []
         for first in range(0, len(population), config.batch_size):
             batch = population[first:first + config.batch_size]
-            accelerated_results.extend(evaluate_batch(
+            evaluated=evaluate_batch(
                 batch, training_starts, assessment_starts,
                 seeds=[derive(config.seed, 'evaluation', generation, i) for i in range(first, first + len(batch))],
                 encoding_seed=config.encoding_seed, learning=config.learning,
                 learning_config=config.learning_config, training_goals=training_goals,
-                assessment_goals=assessment_goals, backend=config.backend, workers=config.workers, boundary_mode=config.boundary_mode))
+                assessment_goals=assessment_goals, backend=config.backend, workers=config.workers, boundary_mode=config.boundary_mode,return_weights=config.inherit_lifetime)
+            if config.inherit_lifetime:
+                batch_results,weights=evaluated
+                for lane,individual in enumerate(batch):
+                    inherited=individual.inherited;ids=inherited.pair_ids
+                    embedding={s:{q:float(weights[0][lane,i,j]) for j,q in enumerate(ids)}
+                               for i,s in enumerate(inherited.observations)}
+                    output={q:{o:float(weights[1][lane,i,j]) for j,o in enumerate(inherited.outputs)}
+                            for i,q in enumerate(ids)}
+                    lifetime_population.append(inherit_lifetime_mappings(individual,embedding,output))
+                accelerated_results.extend(batch_results)
+            else:
+                accelerated_results.extend(evaluated)
             if progress:
                 values = [r['training']['fitness'] for r in accelerated_results]
                 progress(dict(phase='evaluating', generation=generation, completed=len(values),
@@ -179,6 +195,8 @@ def evaluate_generation(population, config, generation, split, progress=None):
                                       training_goals=training_goals, assessment_goals=assessment_goals, boundary_mode=config.boundary_mode)
         else:
             result, detail = accelerated_results[index], None
+        if config.inherit_lifetime and accelerated_results is None:
+            lifetime_population.append(inherit_lifetime_mappings(individual,detail['learned_embedding'],detail['learned_output']))
         result['index'] = index
         results.append(result)
         if index == 0 or result['training']['fitness'] > results[champion]['training']['fitness']:
@@ -224,10 +242,14 @@ def evaluate_generation(population, config, generation, split, progress=None):
     record = dict(task_sampling=sampling, summary=summary, training_starts=training_starts, assessment_starts=assessment_starts,
                   training_goals=training_goals, assessment_goals=assessment_goals,
                   individuals=results, champion_index=champion)
-    return record, champion_detail
+    return (record,champion_detail,lifetime_population) if return_lifetime else (record,champion_detail)
 
 
-def reproduce(population, results, config, generation, progress=None, *, speciation_state=None, return_speciation=False):
+def reproduce(population, results, config, generation, progress=None, *, speciation_state=None, return_speciation=False, lifetime_population=None):
+    if config.inherit_lifetime:
+        if lifetime_population is None or len(lifetime_population)!=len(population):
+            raise ValueError('lifetime inheritance requires end-of-training mappings for every parent')
+        population=lifetime_population
     if config.speciation:
         from .speciation import reproduce as reproduce_species
         children,ancestry,report,state = reproduce_species(population,results,config,generation,speciation_state,progress)

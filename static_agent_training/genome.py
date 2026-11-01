@@ -1,6 +1,6 @@
 """Inherited species state and its predeveloped, fixed repertoire."""
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import hashlib
 import json
 
@@ -77,3 +77,14 @@ def develop(initial_pairs, observations, outputs, *, budgets=64, development_see
     inherited = InheritedMappings.initialize(repertoire, observations, outputs, seed=mapping_seed)
     return Species(tuple(result['initial_pairs']), tuple(result['initial_budgets']), inherited,
                    repertoire, config, json.dumps(result, sort_keys=True))
+
+
+def inherit_lifetime_mappings(parent, embedding, output):
+    """Explicitly commit end-of-training logits as a new immutable genotype.
+
+    Repertoire, seeds, budgets, and development provenance are retained. Mutable
+    lifetime state and assessment data are not inherited.
+    """
+    inherited=parent.inherited
+    mappings=InheritedMappings(inherited.observations,inherited.outputs,inherited.pair_ids,embedding,output)
+    return replace(parent,inherited=mappings)

@@ -8,7 +8,8 @@ import sys
 
 HELP = '''Usage:
   ./train                         Start a new run with a live graph
-  ./train compare                 Run matched speciation/control benchmarks
+  ./train compare                 Run matched treatment benchmarks
+  ./train compare --treatment learning
   ./train status                  Show running and saved runs
   ./train status --watch          Refresh progress every 5 seconds
   ./train resume                  Resume the most recently checkpointed run

@@ -35,7 +35,11 @@ weight mutation and selection. The error-update conjecture has **not** been impl
 Lifetime updates never alter the repertoire. Episodes retain learned weights and
 revision history while clearing pending expectations and active traversal. Assessment
 uses a separate frozen copy of learned weights and independent RNG streams.
-Offspring use inherited weights, not learned lifetime weights.
+By default, offspring use the original inherited weights. With
+`inherit_lifetime=True`, end-of-training embedding and output logits are copied
+into immutable reproductive parents before selection/mutation (including elites).
+Assessment updates and transient learner state are never inherited. Evaluated and
+reproductive parent IDs are recorded separately.
 
 ## Evolution and selection
 

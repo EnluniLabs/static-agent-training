@@ -69,7 +69,7 @@ PAGE = '''<!doctype html><html lang="en"><meta charset="utf-8">
 <style>
 :root{color-scheme:dark}body{font:18px system-ui;background:#101725;color:#eef4ff;max-width:1050px;margin:35px auto;padding:20px}h1{font-size:32px}p{color:#b8c5d8;line-height:1.5}input,button,select{font:inherit;border:1px solid #62738e;background:#24344d;color:white;border-radius:8px;padding:10px;margin:6px}input[type=number]{width:100px}button{cursor:pointer}button:disabled{opacity:.4}#run{background:#205d9c}svg{background:#182438;width:100%;border-radius:16px;margin:25px 0}#status{font-size:25px;min-height:45px}#error{color:#ffb8b8}#scrub{width:95%}.small{font-size:15px}#detail{min-height:30px}
 </style>
-<a href="/runs" style="color:#7fc4ff">Training runs →</a> · <a href="/comparisons" style="color:#7fc4ff">Speciation benchmarks →</a>
+<a href="/runs" style="color:#7fc4ff">Training runs →</a> · <a href="/comparisons" style="color:#7fc4ff">Benchmarks →</a>
 <p id="background" class="small" aria-live="polite"></p>
 <h1>Animal playground</h1><p>Choose a starting position and a goal. Watch the saved animal try to reach it within 12 moves.</p>
 <label>Best candidate from run <select id="candidate" disabled style="max-width:100%"></select></label>

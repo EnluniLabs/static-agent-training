@@ -77,14 +77,22 @@ def run_experiment(config, directory, *, resume=False, until_generation=None, pr
         progress(dict(phase='ready', generation=first, history=history))
     last = config.generations if until_generation is None else min(config.generations, until_generation)
     for generation in range(first, last):
-        record, detail = evaluate_generation(population, config, generation, split, progress)
+        record, detail, lifetime_population = evaluate_generation(population, config, generation, split, progress, return_lifetime=True)
         champion = population[record['champion_index']]
         next_population, ancestry, species_report, speciation_state = reproduce(
             population, record['individuals'], config, generation, progress,
-            speciation_state=speciation_state, return_speciation=True)
+            speciation_state=speciation_state, return_speciation=True, lifetime_population=lifetime_population)
         record['speciation'] = species_report
         record['summary']['species_count'] = species_report['count']
         record['summary']['species_sizes'] = [g['size'] for g in species_report['groups']]
+        for event in ancestry:
+            index=event['parent_index']
+            event['lifetime_inherited']=config.inherit_lifetime
+            event['evaluated_parent_id']=record['individuals'][index]['genotype_id']
+            event['reproductive_parent_id']=(lifetime_population[index].genotype_id if config.inherit_lifetime
+                                               else record['individuals'][index]['genotype_id'])
+        record['inheritance']=dict(enabled=config.inherit_lifetime,source='end-of-training' if config.inherit_lifetime else 'inherited-genotype',
+                                   changed_parents=sum(p.genotype_id!=r['genotype_id'] for p,r in zip(lifetime_population,record['individuals'])) if config.inherit_lifetime else 0)
         record['reproduction'] = ancestry
         history.append(record['summary'])
         write_json(directory / 'generations' / f'{generation:05d}.json', record)
@@ -126,6 +134,7 @@ def main():
     parser.add_argument('--speciation-threshold', type=float)
     parser.add_argument('--max-species', type=int)
     parser.add_argument('--no-learning', action='store_true', default=None)
+    parser.add_argument('--inherit-lifetime', action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument('--fixed-goal', action='store_true', default=None, help='use the legacy zero-target task')
     parser.add_argument('--no-live', action='store_true', help='print generation summaries instead of redrawing a graph')
     args = parser.parse_args()
@@ -133,7 +142,7 @@ def main():
         if args.resume:
             if any(getattr(args, name) is not None for name in
                    ('output', 'config', 'population', 'episodes', 'assessment_episodes', 'elites',
-                    'tournament_size', 'seed', 'no_learning', 'fixed_goal', 'backend', 'workers', 'batch_size', 'distance_distribution', 'distance_mean', 'distance_stddev', 'speciation', 'speciation_threshold', 'max_species', 'boundary_mode', 'include_zero')):
+                    'tournament_size', 'seed', 'no_learning', 'fixed_goal', 'backend', 'workers', 'batch_size', 'distance_distribution', 'distance_mean', 'distance_stddev', 'speciation', 'speciation_threshold', 'max_species', 'boundary_mode', 'include_zero', 'inherit_lifetime')):
                 parser.error('resume uses saved configuration; only --generations and --no-live may override')
             config = TrainingConfig.from_data(load_checkpoint(args.resume)['config'])
             if args.generations is not None:
@@ -141,7 +150,7 @@ def main():
             directory = args.resume
         else:
             values = {name: getattr(args, name) for name in
-                      ('population', 'generations', 'episodes', 'assessment_episodes', 'elites', 'tournament_size', 'seed', 'backend', 'workers', 'batch_size', 'distance_distribution', 'distance_mean', 'distance_stddev', 'speciation', 'speciation_threshold', 'max_species', 'boundary_mode', 'include_zero')
+                      ('population', 'generations', 'episodes', 'assessment_episodes', 'elites', 'tournament_size', 'seed', 'backend', 'workers', 'batch_size', 'distance_distribution', 'distance_mean', 'distance_stddev', 'speciation', 'speciation_threshold', 'max_species', 'boundary_mode', 'include_zero', 'inherit_lifetime')
                       if getattr(args, name) is not None}
             if 'population' in values and 'elites' not in values:
                 values['elites'] = min(5, values['population'] - 1)

@@ -10,6 +10,13 @@ optional acceleration setup is documented below. New-run defaults are uniform
 start/goal pairs, hard walls, and speciation disabled. A current number and target
 are separate inputs; the agent receives no computed distance or suggested move.
 
+Local lifetime updates use tested expectations and structural consistency rather
+than a task-reward gradient. Evolutionary selection separately uses task success.
+The current number-line experiment supplies a goal; goal-free exploration, food
+finding without location hints, and fixed-structure transfer to a larger world
+are proposed experiments in [future work](FUTURE_WORK.md), not demonstrated
+capabilities. Learned-weight inheritance is optional and disabled by default.
+
 Documentation:
 
 - [Implementation and experiment boundaries](docs/IMPLEMENTATION.md)
@@ -216,7 +223,7 @@ repertoire with fresh budgets and a recorded fresh development seed. This
 recomputes shared execution, including lost and new mergers. Otherwise the fixed
 repertoire is reused with no reduction. All surviving pair IDs retain their
 inherited weights before any selected weight noise; new IDs receive seeded
-weights and removed IDs lose theirs. Lifetime weights are never consulted.
+weights and removed IDs lose theirs. By default, lifetime weights are not consulted. With `--inherit-lifetime`, end-of-training learned mappings are first committed to reproductive parents, then the same mutation rules apply.
 
 Each mutation log records parent and offspring genotype IDs, configuration,
 independent RNG stream seeds, selected operators, edits and no-ops, added/removed
@@ -325,7 +332,7 @@ Separate seed streams drive population generation, development, initial weights,
 training starts, embedding sampling, output sampling, frozen assessment,
 tournament selection, and offspring mutation. Episode resets retain lifetime
 learning; assessment uses separate copies of learned weights and separate RNG
-streams. Reproduction always takes the immutable inherited genotype. The legacy
+streams. Reproduction takes an immutable genotype; by default its weights are the original inherited weights. The optional `--inherit-lifetime` mode commits learned mappings before reproduction. The legacy
 `Species` class denotes one inherited genotype, not a cluster or speciation rule.
 
 Each run directory contains:
@@ -630,3 +637,41 @@ under the original and hard-wall rules. Rates are averaged per target so targets
 with two feasible approach directions do not receive extra weight. The JSON output
 also records expected target exposure from each candidate's original normal-distance
 training distribution. This diagnostic changes no training state.
+
+
+A lifetime-learning treatment is available in the same matched comparison runner:
+
+```sh
+./train compare --treatment learning --population 256 --generations 20 --episodes 100 --assessment-episodes 200
+```
+
+This runs learning off versus learning on with speciation disabled in both arms.
+Learning off disables both empirical expectation updates and delayed embedding
+compatibility corrections during the lifetime. It does not remove expectation
+outputs, change the repertoire, alter mutation settings, or inherit lifetime
+weights. Learning on retains the current error rules. Both arms use the same
+initial genotypes, tasks, evaluation RNG coordinates, and evaluation budgets;
+assessment and final testing freeze weights in both. Evolution may subsequently
+diverge because training fitness differs. This tests the lifetime-learning package
+as a whole; it does not separately attribute effects to its two update rules.
+
+The default `./train compare` still tests speciation; `--treatment learning` selects
+the new experiment. Reports store the treatment and explicit labels. Resume reads
+the saved treatment, and historical speciation reports remain readable. The live
+`/comparisons` view labels learning on/off and links to each arm's saved candidate.
+
+
+To compare inherited lifetime learning against the default inheritance rule:
+
+```sh
+./train compare --treatment inheritance --population 256 --generations 20 --episodes 100 --assessment-episodes 200 --workers 4 --batch-size 256
+```
+
+Both arms enable lifetime learning and disable speciation. Inheritance on commits
+end-of-training embedding and output logits to each reproductive parent, including
+elites, before ordinary mutation and redevelopment. Inheritance off retains the
+original genotype weights. Assessment never supplies inherited updates. Pending
+expectations, traversal state, and learner revision flags are not inherited.
+Generation records retain evaluated and reproductive parent IDs for provenance;
+checkpoints preserve the resulting next population. Existing runs default to
+inheritance off. A standalone run can enable this with `--inherit-lifetime`.

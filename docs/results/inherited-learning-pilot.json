@@ -1,0 +1,81 @@
+{
+  "schema_version": "crt-treatment-comparison-v1",
+  "name": "inherited-learning-20261101-154322",
+  "treatment": "inheritance",
+  "status": "completed",
+  "population": 256,
+  "generations": 20,
+  "episodes": 100,
+  "assessment_episodes": 200,
+  "benchmark_episodes": 2000,
+  "seeds": [
+    42,
+    43,
+    44
+  ],
+  "primary_endpoint": "success of the highest-training saved champion on fresh shared held-out tasks, with learned weights frozen",
+  "boundary_mode": "clamp",
+  "distance_distribution": "uniform",
+  "pairs": [
+    {
+      "common_generations": 20,
+      "control": 0.1325,
+      "difference_percentage_points": 0.40000000000000036,
+      "inheritance": 0.1365,
+      "initialization_verified": true,
+      "matched_window_population_heldout": {
+        "control": 0.1318046875,
+        "inheritance": 0.12665234375
+      },
+      "matched_window_population_training": {
+        "control": 0.146765625,
+        "inheritance": 0.1444609375
+      },
+      "seed": 42,
+      "tasks_verified": true
+    },
+    {
+      "common_generations": 20,
+      "control": 0.1385,
+      "difference_percentage_points": 2.8499999999999996,
+      "inheritance": 0.167,
+      "initialization_verified": true,
+      "matched_window_population_heldout": {
+        "control": 0.12982421875,
+        "inheritance": 0.13842578125
+      },
+      "matched_window_population_training": {
+        "control": 0.1505546875,
+        "inheritance": 0.15619531250000002
+      },
+      "seed": 43,
+      "tasks_verified": true
+    },
+    {
+      "common_generations": 20,
+      "control": 0.134,
+      "difference_percentage_points": 0.10000000000000009,
+      "inheritance": 0.135,
+      "initialization_verified": true,
+      "matched_window_population_heldout": {
+        "control": 0.1256796875,
+        "inheritance": 0.130625
+      },
+      "matched_window_population_training": {
+        "control": 0.146078125,
+        "inheritance": 0.1522265625
+      },
+      "seed": 44,
+      "tasks_verified": true
+    }
+  ],
+  "paired_effect": {
+    "interval95": [
+      -2.6309112077369385,
+      4.8642445410702715
+    ],
+    "mean_percentage_points": 1.1166666666666667,
+    "seeds": 3
+  },
+  "note": "Completed pilot; three seed pairs. The interval does not establish a benefit. Raw checkpoints remain under ignored runs/."
+}
