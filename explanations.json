@@ -1,0 +1,235 @@
+{
+  "schema_version": "crt-initialization-v1",
+  "generator_version": "closed-mixture-v1",
+  "config": {
+    "seed": 42,
+    "count": 4,
+    "max_depth": 6,
+    "max_nodes": 31,
+    "combinator_probability": 0.5
+  },
+  "initial_pairs": [
+    {
+      "chain_id": 0,
+      "generation_seed": 53982430110289324853105434623646105226251397079764743998386282494905721725346,
+      "pair_id": "e9587b92a135e3b5797ec8d085795a0a0aa9a27779252cd1386c40527ec5bfd6",
+      "left": {
+        "term_id": "00f2210425bd23b64242d2fad8d232dcc5596d4966fb7daca9b93cbece4b2331",
+        "ast": [
+          "abs",
+          [
+            "abs",
+            [
+              "abs",
+              [
+                "app",
+                [
+                  "app",
+                  [
+                    "var",
+                    2
+                  ],
+                  [
+                    "var",
+                    0
+                  ]
+                ],
+                [
+                  "app",
+                  [
+                    "var",
+                    1
+                  ],
+                  [
+                    "var",
+                    0
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ],
+        "display": "\u03bb.\u03bb.\u03bb.((2 0) (1 0))"
+      },
+      "right": {
+        "term_id": "3a02597beaa152943d768936ee8b40023830de26bb7af9b9b062e5c5d6d3e0f5",
+        "ast": [
+          "abs",
+          [
+            "app",
+            [
+              "app",
+              [
+                "app",
+                [
+                  "abs",
+                  [
+                    "var",
+                    0
+                  ]
+                ],
+                [
+                  "abs",
+                  [
+                    "var",
+                    1
+                  ]
+                ]
+              ],
+              [
+                "app",
+                [
+                  "var",
+                  0
+                ],
+                [
+                  "var",
+                  0
+                ]
+              ]
+            ],
+            [
+              "app",
+              [
+                "var",
+                0
+              ],
+              [
+                "app",
+                [
+                  "var",
+                  0
+                ],
+                [
+                  "var",
+                  0
+                ]
+              ]
+            ]
+          ]
+        ],
+        "display": "\u03bb.(((\u03bb.0 \u03bb.1) (0 0)) (0 (0 0)))"
+      }
+    },
+    {
+      "chain_id": 1,
+      "generation_seed": 109471147134723786366994240458614160454830278727166624235287731937806270588241,
+      "pair_id": "477ef14dc7b2616a6ec1ca08f9f2596cb20712a3a5bb169e7956b4dbeb662fc9",
+      "left": {
+        "term_id": "85fbd0c31679436c8b1538c36d5a49d2b4fbf4c0fe80c0ad0f5a565ece4c9de1",
+        "ast": [
+          "abs",
+          [
+            "var",
+            0
+          ]
+        ],
+        "display": "\u03bb.0"
+      },
+      "right": {
+        "term_id": "85fbd0c31679436c8b1538c36d5a49d2b4fbf4c0fe80c0ad0f5a565ece4c9de1",
+        "ast": [
+          "abs",
+          [
+            "var",
+            0
+          ]
+        ],
+        "display": "\u03bb.0"
+      }
+    },
+    {
+      "chain_id": 2,
+      "generation_seed": 923881190831240634898210056192406838580632255348604461919871800067595068772,
+      "pair_id": "9ecca6e52cb820d4e11cf708e6cb879c67f60498d14036b7f73927939de66a0c",
+      "left": {
+        "term_id": "2f49e24606738623b6b42671a258613271a1f5c9def8411b478c7e3f67007903",
+        "ast": [
+          "app",
+          [
+            "app",
+            [
+              "abs",
+              [
+                "var",
+                0
+              ]
+            ],
+            [
+              "abs",
+              [
+                "var",
+                0
+              ]
+            ]
+          ],
+          [
+            "abs",
+            [
+              "abs",
+              [
+                "app",
+                [
+                  "var",
+                  1
+                ],
+                [
+                  "abs",
+                  [
+                    "var",
+                    1
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ],
+        "display": "((\u03bb.0 \u03bb.0) \u03bb.\u03bb.(1 \u03bb.1))"
+      },
+      "right": {
+        "term_id": "dbcb8163b4e3987e2ebfcdb3978a6b98f536c6fbd969c99fde46a8ab8e795c59",
+        "ast": [
+          "abs",
+          [
+            "abs",
+            [
+              "var",
+              1
+            ]
+          ]
+        ],
+        "display": "\u03bb.\u03bb.1"
+      }
+    },
+    {
+      "chain_id": 3,
+      "generation_seed": 36980161386718687618150491594365705579743396923061853493912191078270459242339,
+      "pair_id": "8843f2a1467ac23863d27125fd77c96636271874e011bcdb3bc331336d894287",
+      "left": {
+        "term_id": "dbcb8163b4e3987e2ebfcdb3978a6b98f536c6fbd969c99fde46a8ab8e795c59",
+        "ast": [
+          "abs",
+          [
+            "abs",
+            [
+              "var",
+              1
+            ]
+          ]
+        ],
+        "display": "\u03bb.\u03bb.1"
+      },
+      "right": {
+        "term_id": "85fbd0c31679436c8b1538c36d5a49d2b4fbf4c0fe80c0ad0f5a565ece4c9de1",
+        "ast": [
+          "abs",
+          [
+            "var",
+            0
+          ]
+        ],
+        "display": "\u03bb.0"
+      }
+    }
+  ]
+}
