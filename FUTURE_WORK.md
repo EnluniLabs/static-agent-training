@@ -4,6 +4,94 @@ Recorded 2026-11-01. These are plans and hypotheses, not instructions to change
 an active experiment. Speciation stays off for the next studies unless explicitly
 included as a treatment.
 
+## Central experiment: coherent versus arbitrary-node repertoires
+
+Status: **primary proposed hypothesis test** (discussion 2026-11-02).
+This takes priority conceptually over generalized sensory interfaces and future
+repertoire expansion. It is a plan, not authorization to interrupt or change
+ongoing experiments.
+
+**Question:** Does an inherited repertoire generated under independently defined
+lambda-calculus reduction rules guide lifetime learning better than an otherwise
+comparable repertoire of arbitrary nodes and successor links?
+
+The coherent animal develops pair states and certified successors by lambda
+reduction. The control uses arbitrary node identities and assigned successor
+links (simple node chains as a first baseline). After development, both are
+traversed as nodes and links: lambda expressions are not reduced during
+lifetime learning. Both retain the **same** sensory interface, expectation and
+movement outputs, empirical-error rule, delayed structural-error rule,
+initialization protocol, evolution/fitness procedure, and evaluation tasks.
+The random control still receives structural-error updates toward its own
+assigned successors; it is **not** an empirical-only or anchor-free animal.
+Keep successor links fixed during a lifetime in both arms.
+
+The distinction is the *generative restrictions on admissible repertoires*:
+lambda-derived links must follow a computational rule independent of the
+environment and fitness, while arbitrary links need not. Merely relabeling
+the same graph with random node IDs is mathematically equivalent under
+matched parameters and random choices, and cannot establish an advantage.
+A simple arbitrary linked-list baseline is a useful first test, but its
+topology may differ from the lambda-derived repertoire; if an effect appears,
+follow up with random graphs matched for node/edge counts, chain-length
+distribution, branching, merges, cycles, and terminal/successor availability
+where feasible. Report remaining mismatches rather than calling them
+coherence effects.
+
+### Is the current number-line task informative enough?
+
+Begin in the existing hard-wall number-line environment without redesigning
+the agent. Its simple regularity might be enough to expose a difference, or
+animals may solve it using only a few nodes or local associations. Before
+interpreting null or positive results, instrument the degree to which
+inherited structure is actually exercised:
+
+- Number and fraction of unique repertoire nodes selected, by episode and run.
+- Number and fraction of unique successor edges exercised, repeated edge use,
+  and coverage of chains, merges, branches, or cycles where present.
+- Eligibility, count, and magnitude of structural-error updates; separate
+  these from empirical-error updates.
+- Effect of structural updates on later mappings, expectations, and behavior,
+  using a matched structural-learning-disabled control where practical.
+- Relationship between utilization, structural-update activity, prediction
+  accuracy, adaptation speed, and held-out task success.
+
+**Utilization is not dependence.** Visiting many nodes does not show that
+structural guidance helps, and frequent structural updates do not prove
+benefit. A learner may exploit only isolated edges and never engage the
+higher-order organization of its repertoire. Check whether the present local
+successor correction can produce effects spanning multiple connected states,
+rather than assuming it does.
+
+### Comparison and interpretation
+
+Use multiple independent repertoire generations and evolutionary seeds;
+match population sizes, experience budgets, selection criteria, initial
+parameter distributions, and held-out trials. Compare learning curves and
+sample efficiency, frozen prediction accuracy, final task success, retention,
+and transfer if supported by the unchanged interface. Include empirical-only
+(structural correction off) as a diagnostic, but keep coherent vs arbitrary
+nodes with **both** learning mechanisms as the central contrast. Separate
+effects of repertoire generation from differences in graph size, topology,
+compute, and evolutionary selection.
+
+If the number-line task engages little structure, a similar performance
+result is weak evidence about the central hypothesis; consider a task that
+requires reuse of more structural relationships, with its requirements
+specified before testing. If the coherent animal wins, establish whether
+the advantage comes from lambda-specific generative constraints or from
+ordinary graph statistics. If neither wins despite demonstrably substantial
+structural dependence, that is meaningful negative evidence under the tested
+conditions. Do not infer that lambda-derived structure necessarily models
+physical laws, or that its origin alone changes the behavior of an otherwise
+identical unlabeled graph.
+
+The proposed role of coherent structure is **scaffolding acquisition**:
+it may guide representations during learning without needing to remain
+computationally important after those representations are acquired. Future
+repertoire expansion could add new structure when existing learned
+interpretations prove insufficient; that extension is not part of this test.
+
 ## Lifetime learning on/off benchmark
 
 Status: launched on 2026-11-01 as `lifetime-learning-20261101-153325`: 256 animals
