@@ -1,13 +1,14 @@
-"""Serve an interactive frozen-animal tester and open it on Windows from WSL."""
+"""Serve model/session management and frozen playback; retain legacy views."""
 import argparse
 import json
 import random
+import secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import shutil
 import subprocess
 import webbrowser
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 from .agent import Agent, run_episode
 from .candidates import CandidateStore, attach_benchmark, load_saved_candidate
@@ -19,6 +20,7 @@ from .seeds import derive
 from .status import ROOT, RUNS_PAGE, collect_runs
 from .comparison import list_reports
 from .comparison_view import PAGE as COMPARISON_PAGE
+from .workspace import WEB, Workspace
 
 
 def attempt(bundle, start, goal, seed, policy="animal"):
@@ -30,6 +32,9 @@ def attempt(bundle, start, goal, seed, policy="animal"):
         raise ValueError('Start and goal must be between -20 and 20')
     if not 0 <= seed <= 2**32 - 1:
         raise ValueError('Seed must be between 0 and 4294967295')
+    if bundle.get('model') == 'senses':
+        from .experimental.sensory_playback import attempt as sensory_attempt
+        return sensory_attempt(bundle, start, goal, seed, policy)
     conditioned = bundle.get('varying_goals', False) or policy == 'random'
     if not conditioned and goal != 0:
         raise ValueError("This older animal was trained only toward zero and has no goal input. Use a new varying-goal run for custom goals")
@@ -69,7 +74,7 @@ PAGE = '''<!doctype html><html lang="en"><meta charset="utf-8">
 <style>
 :root{color-scheme:dark}body{font:18px system-ui;background:#101725;color:#eef4ff;max-width:1050px;margin:35px auto;padding:20px}h1{font-size:32px}p{color:#b8c5d8;line-height:1.5}input,button,select{font:inherit;border:1px solid #62738e;background:#24344d;color:white;border-radius:8px;padding:10px;margin:6px}input[type=number]{width:100px}button{cursor:pointer}button:disabled{opacity:.4}#run{background:#205d9c}svg{background:#182438;width:100%;border-radius:16px;margin:25px 0}#status{font-size:25px;min-height:45px}#error{color:#ffb8b8}#scrub{width:95%}.small{font-size:15px}#detail{min-height:30px}
 </style>
-<a href="/runs" style="color:#7fc4ff">Training runs →</a> · <a href="/comparisons" style="color:#7fc4ff">Benchmarks →</a>
+<a href="/" style="color:#7fc4ff">Model workspace</a> · <a href="/runs" style="color:#7fc4ff">Training runs →</a> · <a href="/comparisons" style="color:#7fc4ff">Benchmarks →</a>
 <p id="background" class="small" aria-live="polite"></p>
 <h1>Animal playground</h1><p>Choose a starting position and a goal. Watch the saved animal try to reach it within 12 moves.</p>
 <label>Best candidate from run <select id="candidate" disabled style="max-width:100%"></select></label>
@@ -115,6 +120,7 @@ $('candidate').onchange=loadCandidate;$('refresh-candidates').onclick=()=>refres
 
 def handler_for(bundle, *, status_root=ROOT):
     candidates = CandidateStore(status_root, bundle)
+    workspace = Workspace(status_root, bundle)
 
     class Handler(BaseHTTPRequestHandler):
         def send(self, status, content, content_type='application/json'):
@@ -128,6 +134,40 @@ def handler_for(bundle, *, status_root=ROOT):
 
         def do_GET(self):
             parsed = urlsplit(self.path)
+            if parsed.path.startswith('/api/') or parsed.path.startswith('/assets/'):
+                try:
+                    if not self.local_host():
+                        self.send(403, '{"error":"Local workspace access only"}')
+                        return
+                    query = parse_qs(parsed.query)
+                    arg = lambda key, default='': query.get(key, [default])[0]
+                    if parsed.path == '/api/bootstrap':
+                        self.send(200, json.dumps(dict(token=workspace.token, runs=workspace.runs())))
+                    elif parsed.path == '/api/runs':
+                        self.send(200, json.dumps(workspace.runs()))
+                    elif parsed.path == '/api/run':
+                        self.send(200, json.dumps(workspace.detail(arg('run'))))
+                    elif parsed.path == '/api/models':
+                        self.send(200, json.dumps(workspace.models.snapshots(arg('run'), arg('model', 'baseline'))))
+                    elif parsed.path == '/api/export':
+                        kind, snapshot, path = workspace.models.load(arg('snapshot'))
+                        if path is not None:
+                            self.download(path)
+                        else:
+                            self.send(200, json.dumps(snapshot))
+                    elif parsed.path == '/api/log':
+                        self.send(200, json.dumps(workspace.log(arg('run'), arg('source', 'output'))))
+                    elif parsed.path == '/api/artifact':
+                        self.download(workspace.artifact(arg('run'), arg('file')))
+                    elif parsed.path == '/assets/workspace.css':
+                        self.send(200, (WEB / 'workspace.css').read_text(), 'text/css')
+                    elif parsed.path == '/assets/workspace.js':
+                        self.send(200, (WEB / 'workspace.js').read_text(), 'application/javascript')
+                    else:
+                        self.send(404, '{"error":"Not found"}')
+                except (ValueError, OSError, KeyError, TypeError) as error:
+                    self.send(400, json.dumps(dict(error=str(error))))
+                return
             if parsed.path == '/candidates':
                 self.send(200, json.dumps(candidates.list()))
                 return
@@ -139,6 +179,8 @@ def handler_for(bundle, *, status_root=ROOT):
                     self.send(400, json.dumps(dict(error=str(error))))
                 return
             if parsed.path == '/':
+                self.send(200, (WEB / 'index.html').read_text(), 'text/html')
+            elif parsed.path == '/playground':
                 self.send(200, PAGE, 'text/html')
             elif self.path == '/comparisons':
                 self.send(200, COMPARISON_PAGE, 'text/html')
@@ -149,6 +191,9 @@ def handler_for(bundle, *, status_root=ROOT):
             elif self.path == '/runs.json':
                 self.send(200, json.dumps(collect_runs(status_root)))
             elif self.path == '/info':
+                if not bundle:
+                    self.send(400, '{"error":"Choose a saved candidate first"}')
+                    return
                 self.send(200, json.dumps(dict(varying_goals=bundle.get('varying_goals', False),
                                                training_success=bundle['training_success'],
                                                assessment_success=bundle['assessment_success'],
@@ -160,6 +205,25 @@ def handler_for(bundle, *, status_root=ROOT):
                 self.send(404, '{"error":"Not found"}')
 
         def do_POST(self):
+            if self.path.startswith('/api/'):
+                if not self.local_host() or not secrets.compare_digest(self.headers.get('X-Workspace-Token', ''), workspace.token):
+                    self.send(403, '{"error":"Refresh this local workspace before starting a session"}')
+                    return
+                origin = self.headers.get('Origin')
+                if origin and origin != 'http://' + self.headers.get('Host', ''):
+                    self.send(403, '{"error":"Cross-origin session control is not allowed"}')
+                    return
+                try:
+                    length = int(self.headers.get('Content-Length', '0'))
+                    if not 0 < length <= 16384:
+                        raise ValueError('Invalid request size')
+                    data = json.loads(self.rfile.read(length))
+                    if not isinstance(data, dict):
+                        raise ValueError('Expected a request object')
+                    self.send(200, json.dumps(workspace.post(self.path, data)))
+                except (ValueError, KeyError, TypeError, OSError) as error:
+                    self.send(400, json.dumps(dict(error=str(error))))
+                return
             if self.path != '/attempt':
                 self.send(404, '{"error":"Not found"}')
                 return
@@ -181,6 +245,21 @@ def handler_for(bundle, *, status_root=ROOT):
 
         def log_message(self, *args):
             pass
+
+        def local_host(self):
+            host = self.headers.get('Host', '')
+            return host in (f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}')
+
+        def download(self, path):
+            with path.open('rb') as handle:
+                import os
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/gzip' if path.suffix == '.gz' else 'application/json')
+                self.send_header('Content-Disposition', "attachment; filename*=UTF-8''" + quote(path.name))
+                self.send_header('Content-Length', str(os.fstat(handle.fileno()).st_size))
+                self.end_headers()
+                shutil.copyfileobj(handle, self.wfile)
+    Handler.workspace = workspace
     return Handler
 
 
@@ -195,29 +274,26 @@ def open_browser(url):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('source', nargs='?', type=Path, help='run directory or exported champion.json; defaults to latest completed run')
+    parser.add_argument('source', nargs='?', type=Path, help='optional baseline run or exported champion for the legacy playground')
     parser.add_argument('--port', type=int, default=8765)
     parser.add_argument('--no-open', action='store_true')
     args = parser.parse_args()
     source = args.source
-    if source is None:
-        candidates = [p.parent.parent for p in (Path(__file__).resolve().parent.parent / 'runs').glob('*/generations/*.json')]
-        if not candidates:
-            parser.error('No completed training runs found')
-        source = max(candidates, key=lambda p: (p / 'checkpoint.json.gz').stat().st_mtime_ns)
     try:
-        bundle = load_saved_candidate(source) if source.is_dir() else json.loads(source.read_text())
-        bundle['run_name'] = source.name if source.is_dir() else source.parent.name
-        if source.is_dir() and source.resolve().parent == (ROOT / 'runs').resolve():
-            bundle['run_id'] = source.name
-        benchmark_path = (source / 'demo' if source.is_dir() else source.parent) / 'benchmark.json'
-        attach_benchmark(bundle, benchmark_path)
+        bundle = {}
+        if source is not None:
+            bundle = load_saved_candidate(source) if source.is_dir() else json.loads(source.read_text())
+            bundle['run_name'] = source.name if source.is_dir() else source.parent.name
+            if source.is_dir() and source.resolve().parent == (ROOT / 'runs').resolve():
+                bundle['run_id'] = source.name
+            benchmark_path = (source / 'demo' if source.is_dir() else source.parent) / 'benchmark.json'
+            attach_benchmark(bundle, benchmark_path)
         server = ThreadingHTTPServer(('127.0.0.1', args.port), handler_for(bundle))
     except (ValueError, OSError) as error:
         parser.error(str(error))
     url = f'http://localhost:{server.server_port}'
-    print(f'Animal playground: {url}', flush=True)
-    print('Learning frozen. Ctrl-C stops the server.', flush=True)
+    print(f'Model workspace: {url}', flush=True)
+    print('Playback is frozen. Sessions start only from an explicit launch. Ctrl-C stops the viewer, not training.', flush=True)
     if not args.no_open:
         try:
             open_browser(url)

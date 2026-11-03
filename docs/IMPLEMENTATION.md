@@ -1,7 +1,9 @@
 # Implementation and experiment boundaries
 
-This describes the implementation as of 2026-11-01. It separates current behavior
-from historical experiment settings and hypotheses in [future work](../FUTURE_WORK.md).
+This describes the baseline implementation, with artifact/command updates on
+2026-11-02. The separate [fixed-senses variant](AGNOSTIC_INTERFACE.md) has its own
+interface and learning rules. See [usage](../USE.md) for commands and
+[future work](../FUTURE_WORK.md) for research hypotheses.
 
 ## What the agent receives
 
@@ -97,7 +99,9 @@ silently converted to new rules on resume.
 
 A checkpoint does not contain learned mappings for every evaluated individual.
 Detailed learned mappings are currently retained for each generation's champion.
-The collection of multiple top performers is planned, not implemented.
+`champions.json` indexes the top distinct saved generation-champion genotypes by
+training success; every generation's full champion trace remains available.
+It is not a collection of multiple animals from within each generation.
 
 ## Scope of changes during this session
 

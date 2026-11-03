@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Open the frozen-animal playground, including from WSL on Windows."""
+"""Open the model workspace, session controls and frozen playback."""
 from static_agent_training.play import main
 
 if __name__ == '__main__':

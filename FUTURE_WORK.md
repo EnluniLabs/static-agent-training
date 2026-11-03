@@ -1,8 +1,19 @@
 # Future work
 
+For commands and current local runs, see [USE.md](USE.md) and `./project runs`.
+Status paragraphs below are dated research records, not a live process registry.
+The GitHub coherence-control and signal-interface proposal sections were restored
+locally on 2026-11-02; implemented prototype behavior and remaining gaps are in
+the [interface design](docs/AGNOSTIC_INTERFACE.md) and
+[audit](docs/AGNOSTIC_INTERFACE_AUDIT.md).
+
 Recorded 2026-11-01. These are plans and hypotheses, not instructions to change
 an active experiment. Speciation stays off for the next studies unless explicitly
 included as a treatment.
+
+See the [learning experiment plan](docs/LEARNING_EXPERIMENT_PLAN.md) for the
+three evolutionary conditions, original-versus-learned mapping controls, and
+deployment-only adaptation follow-up.
 
 ## Central experiment: coherent versus arbitrary-node repertoires
 

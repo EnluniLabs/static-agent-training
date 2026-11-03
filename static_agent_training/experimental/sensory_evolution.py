@@ -1,0 +1,194 @@
+"""Sensory lifetime evaluation inside the shared evolutionary training pipeline."""
+from collections import Counter
+from dataclasses import replace
+import hashlib
+import json
+import random
+
+from ..baseline import random_task_mean
+from ..seeds import derive
+from ..speciation import describe
+from .bit_model import BitModel, run_episode
+from .number_line import StimulusNumberLine
+from .senses import SensoryAdapter
+from .sensory_genome import SensoryMappings
+
+
+def fingerprint(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def block(model, tasks, *, learn, encoding_seed, boundary_mode="clamp", goal_conditioned=True):
+    world = SensoryAdapter(StimulusNumberLine(encoding_seed=encoding_seed, boundary_mode=boundary_mode,
+                                                   goal_conditioned=goal_conditioned), model.senses)
+    episodes, counts = [], Counter()
+    for start, goal in tasks:
+        offset = len(model.events)
+        final = run_episode(model, world, (start, goal), learn=learn)[-1]
+        events = model.events[offset:]
+        feedback = [e for e in events if e['kind'] == 'FEEDBACK']
+        empirical = [e for e in events if e['kind'] == 'EMPIRICAL_UPDATE']
+        updates = Counter(e['kind'] for e in events)
+        counts.update(updates)
+        episodes.append(dict(start=start, goal=goal, success=final.success, reason=final.reason,
+                             outputs=updates['ACTION'] + updates['EXPECTATION'], actions=updates['ACTION'],
+                             expectations=updates['EXPECTATION'], tested=len(feedback),
+                             correct=sum(e['correct'] for e in feedback),
+                             loss_sum=sum(e['prediction_nll'] for e in feedback),
+                             empirical_loss_sum=sum(e['loss'] for e in empirical), expired=updates['EXPIRED']))
+    tested = sum(e['tested'] for e in episodes)
+    correct = sum(e['correct'] for e in episodes)
+    return dict(fitness=sum(e['success'] for e in episodes) / len(episodes), episodes=episodes,
+                outputs=sum(e['outputs'] for e in episodes), actions=sum(e['actions'] for e in episodes),
+                expectations=counts['EXPECTATION'], tested=tested, correct=correct,
+                prediction_accuracy=correct / tested if tested else None,
+                prediction_nll=sum(e['loss_sum'] for e in episodes) / tested if tested else None,
+                expired=counts['EXPIRED'], empirical_updates=counts['EMPIRICAL_UPDATE'], conflicts=counts['CONFLICT'])
+
+
+def evaluate(individual, training_tasks, assessment_tasks, *, seed, config):
+    inherited = individual.inherited
+    if not isinstance(inherited, SensoryMappings):
+        raise ValueError('sensory training requires sensory inherited parameters')
+    model = inherited.model(individual.repertoire, seed=seed, learning_config=config.learning_config)
+    model.embedding_rng = random.Random(derive(seed, 'training', 'embedding'))
+    model.output_rng = random.Random(derive(seed, 'training', 'output'))
+    training = block(model, training_tasks, learn=config.learning, encoding_seed=config.encoding_seed,
+                     boundary_mode=config.boundary_mode, goal_conditioned=config.varying_goals)
+    learned = model.to_data()
+    assessor = BitModel(individual.repertoire, senses=inherited.senses, parameters=model.parameters(),
+                        seed=seed, learning_config=config.learning_config)
+    assessor.embedding_rng = random.Random(derive(seed, 'assessment', 'embedding'))
+    assessor.output_rng = random.Random(derive(seed, 'assessment', 'output'))
+    assessment = block(assessor, assessment_tasks, learn=False, encoding_seed=config.encoding_seed,
+                     boundary_mode=config.boundary_mode, goal_conditioned=config.varying_goals)
+    result = dict(genotype_id=individual.genotype_id, seed=seed, training=training, assessment=assessment,
+                  repertoire_size=len(individual.repertoire.pairs), successor_count=len(individual.repertoire.successors),
+                  model='senses')
+    detail = dict(learned_model=learned, assessment_events=assessor.events)
+    reproductive = replace(individual, inherited=SensoryMappings(inherited.pair_ids, inherited.senses,
+                                                                 model.parameters())) if config.inherit_lifetime else None
+    return result, detail, reproductive
+
+
+def evaluate_generation(population, config, generation, split, progress=None, *, return_lifetime=False):
+    from ..evolution import generation_tasks, structural_population_id
+    train_starts, test_starts, train_goals, test_goals = generation_tasks(config, generation, split)
+    training_tasks = list(zip(train_starts, train_goals or [0] * len(train_starts)))
+    assessment_tasks = list(zip(test_starts, test_goals or [0] * len(test_starts)))
+    results, champion, champion_detail = [], 0, None
+    lifetime_population = [] if config.inherit_lifetime else None
+    accelerated = None
+    if config.backend != 'python':
+        from .sensory_accelerated import evaluate_batch, learned_mappings
+        accelerated = []
+        for first in range(0, len(population), config.batch_size):
+            batch = population[first:first + config.batch_size]
+            evaluated = evaluate_batch(batch, train_starts, test_starts,
+                training_goals=train_goals, assessment_goals=test_goals,
+                seeds=[derive(config.seed, 'evaluation', generation, i) for i in range(first, first+len(batch))],
+                encoding_seed=config.encoding_seed, learning=config.learning, learning_config=config.learning_config,
+                backend=config.backend, workers=config.workers, boundary_mode=config.boundary_mode,
+                goal_conditioned=config.varying_goals, return_weights=config.inherit_lifetime)
+            if config.inherit_lifetime:
+                rows, weights = evaluated
+                lifetime_population.extend(replace(p, inherited=learned_mappings(p, weights, i)) for i,p in enumerate(batch))
+            else:
+                rows = evaluated
+            accelerated.extend(rows)
+            if progress:
+                values = [r['training']['fitness'] for r in accelerated]
+                progress(dict(phase='evaluating', generation=generation, completed=len(values),
+                              total=len(population), mean=sum(values)/len(values), best=max(values)))
+    for index, individual in enumerate(population):
+        if accelerated is None:
+            result, detail, reproductive = evaluate(individual, training_tasks, assessment_tasks,
+                        seed=derive(config.seed, 'evaluation', generation, index), config=config)
+            if config.inherit_lifetime:
+                lifetime_population.append(reproductive)
+        else:
+            result, detail = accelerated[index], None
+        result['index'] = index
+        results.append(result)
+        if index == 0 or result['training']['fitness'] > results[champion]['training']['fitness']:
+            champion, champion_detail = index, detail
+        if progress and accelerated is None:
+            values = [r['training']['fitness'] for r in results]
+            progress(dict(phase='evaluating', generation=generation, completed=index + 1,
+                          total=len(population), mean=sum(values) / len(values), best=max(values)))
+    if accelerated is not None:
+        from ..accelerated import assert_equivalent
+        reference, champion_detail, _ = evaluate(population[champion], training_tasks, assessment_tasks,
+            seed=derive(config.seed, 'evaluation', generation, champion), config=config)
+        assert_equivalent({k:v for k,v in results[champion].items() if k!='index'}, reference)
+        reference['index'] = champion
+        results[champion] = reference
+    tested = sum(r['training']['tested'] for r in results)
+    scores = [r['training']['fitness'] for r in results]
+    summary = dict(generation=generation, model='senses', mean=sum(scores) / len(scores), best=max(scores),
+                   assessment_mean=sum(r['assessment']['fitness'] for r in results) / len(results),
+                   champion_assessment=results[champion]['assessment']['fitness'],
+                   random_training=random_task_mean(train_starts, train_goals, boundary_mode=config.boundary_mode),
+                   random_assessment=random_task_mean(test_starts, test_goals, boundary_mode=config.boundary_mode),
+                   unique_genotypes=len({r['genotype_id'] for r in results}),
+                   unique_structures=len({describe(p) for p in population}),
+                   mean_repertoire=sum(r['repertoire_size'] for r in results) / len(results),
+                   expectations=sum(r['training']['expectations'] for r in results), tested=tested,
+                   conflicts=sum(r['training']['conflicts'] for r in results),
+                   prediction_accuracy=sum(r['training']['correct'] for r in results) / tested if tested else None,
+                   task_id=hashlib.sha256(json.dumps([train_starts, test_starts, train_goals, test_goals],separators=(',', ':')).encode()).hexdigest(),
+                   population_id=hashlib.sha256(json.dumps([r['genotype_id'] for r in results],separators=(',', ':')).encode()).hexdigest())
+    summary['structural_population_id'] = structural_population_id(population)
+    record = dict(summary=summary, individuals=results, champion_index=champion,
+                  training_starts=train_starts, assessment_starts=test_starts,
+                  training_goals=train_goals, assessment_goals=test_goals,
+                  task_sampling=dict(distribution=config.distance_distribution,
+                       training_distances=[abs(s-g) for s,g in training_tasks],
+                       assessment_distances=[abs(s-g) for s,g in assessment_tasks]))
+    return (record, champion_detail, lifetime_population) if return_lifetime else (record, champion_detail)
+
+
+def benchmark(directory, bundle, tasks, *, seed):
+    from collections import Counter
+    from pathlib import Path
+    from ..benchmark import interval
+    from ..environment import NumberLine, Output
+    from ..experiment import write_json
+    from ..genome import Species
+    model = BitModel.from_data(bundle['learned_model'])
+    model.embedding_rng.seed(derive(seed, 'benchmark-animal-embedding'))
+    model.output_rng.seed(derive(seed, 'benchmark-animal-output'))
+    boundary = bundle.get('boundary_mode', 'clamp')
+    world = SensoryAdapter(StimulusNumberLine(encoding_seed=bundle['encoding_seed'], boundary_mode=boundary,
+                              goal_conditioned=bundle.get('varying_goals', True)), model.senses)
+    control = NumberLine(encoding_seed=bundle['encoding_seed'], goal_conditioned=True, boundary_mode=boundary)
+    moves = tuple(control.diagnostic_state()['move_decoding'])
+    rng = random.Random(derive(seed, 'benchmark-random-moves'))
+    before = model.parameters()
+    outcomes = []
+    for start, goal in tasks:
+        final = run_episode(model, world, (start, goal), learn=False)[-1]
+        model.events.clear()
+        transition = control.reset(start=start, goal=goal)
+        while not transition.done:
+            transition = control.emit(Output(rng.choice(moves)), source='random')
+        outcomes.append(dict(start=start, goal=goal, animal_success=final.success, random_success=transition.success,
+                             animal_reason=final.reason, random_reason=transition.reason))
+    if model.parameters() != before:
+        raise AssertionError('frozen benchmark changed sensory parameters')
+    result = dict(schema_version='crt-benchmark-v1', model='senses', seed=seed, episodes=len(tasks),
+                  generation=bundle['generation'], genotype_id=Species.from_data(bundle['individual']).genotype_id,
+                  boundary_mode=boundary, exact_random_success=random_task_mean([s for s,g in tasks], [g for s,g in tasks], boundary_mode=boundary),
+                  outcomes=outcomes, task_source='fresh shared held-out draws; no benchmark learning',
+                  random_policy='uniform over all nine movement buttons, including zero; 12 moves')
+    for name in ('animal', 'random'):
+        successes = sum(row[name + '_success'] for row in outcomes)
+        result[name] = dict(successes=successes, success_rate=successes / len(tasks), interval95=interval(successes, len(tasks)),
+                            reasons=dict(Counter(row[name + '_reason'] for row in outcomes)))
+    differences = [int(row['animal_success']) - int(row['random_success']) for row in outcomes]
+    mean = sum(differences) / len(tasks)
+    variance = sum((value - mean)**2 for value in differences) / (len(tasks) * (len(tasks) - 1)) if len(tasks) > 1 else 0
+    result['paired_difference'] = dict(percentage_points=100 * mean,
+                                       interval95=[100 * (mean - 1.96 * variance**.5), 100 * (mean + 1.96 * variance**.5)])
+    write_json(Path(directory) / 'demo/benchmark.json', result)
+    return result

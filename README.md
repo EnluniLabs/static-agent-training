@@ -1,5 +1,15 @@
 # Static agent training
 
+Start with [USE.md](USE.md) for commands and saved artifacts, or run
+`./project help`. [Documentation map](docs/README.md) separates current behavior,
+experimental designs, audits, and historical results.
+
+Open the model workspace with `./project ui`: choose a model, configure and
+launch sessions, monitor live charts and logs, inspect saved champions or sensory
+snapshots, and replay frozen attempts. Both categorical and fixed-senses models
+support evolutionary generations, mutation, selection, checkpoints and resume.
+Fixed-structure lifetime learning remains a separate experiment mode.
+
 A lambda-repertoire evolutionary training system with local lifetime learning,
 replayable checkpoints, optional native CPU/CUDA evaluation, and a WSL/Windows
 browser playground.
@@ -20,10 +30,12 @@ capabilities. Learned-weight inheritance is optional and disabled by default.
 Documentation:
 
 - [Implementation and experiment boundaries](docs/IMPLEMENTATION.md)
-- [Environment interface](ENVIRONMENT_INTERFACE.md)
+- [Environment interface](docs/specs/ENVIRONMENT_INTERFACE.md)
+- [Experimental type-agnostic signal model](docs/AGNOSTIC_INTERFACE.md)
 - [Experiment record and result snapshots](docs/EXPERIMENTS.md)
 - [Bias audit, attribution limits, and reproducible controls](docs/BIAS_AUDIT.md)
 - [Future work and hypotheses](FUTURE_WORK.md)
+- [Learning, selection, and inheritance experiment plan](docs/LEARNING_EXPERIMENT_PLAN.md)
 
 Quick commands:
 
@@ -46,8 +58,9 @@ These seeds are not yet developed explanations or physical interpretations.
 Run with Python 3.10 or later; no dependencies are required:
 
 ```sh
-python3 -m static_agent_training.initialize --seed 42 --count 4 --output explanations.json
-python3 -m static_agent_training.engine explanations.json --budget 64 --seed 42 --output developed.json
+mkdir -p runs
+python3 -m static_agent_training.initialize --seed 42 --count 4 --output runs/explanations.json
+python3 -m static_agent_training.engine runs/explanations.json --budget 64 --seed 42 --output runs/developed.json
 python3 -m unittest discover -s tests
 ```
 
@@ -675,3 +688,38 @@ expectations, traversal state, and learner revision flags are not inherited.
 Generation records retain evaluated and reproductive parent IDs for provenance;
 checkpoints preserve the resulting next population. Existing runs default to
 inheritance off. A standalone run can enable this with `--inherit-lifetime`.
+
+CLI training and comparison runs use a default **4096 MiB address-space limit
+per process** (`--memory-limit-mb` changes it). This includes virtual mappings,
+so a run can hit the ceiling before resident RAM reaches that size. Comparison
+children inherit the parent's ceiling and apply their own default ceiling.
+Evaluator array requests above 512 MiB fail with guidance to reduce batch size
+or episode counts. Completed generations release their serialized state before
+the next evaluation.
+
+For an output directory `runs/example`, diagnostics are appended to
+`runs/example-diagnostics/crash.log` (Python exceptions and fatal signal stacks)
+and `resources.jsonl` (PID, command, memory ceiling, current RSS/virtual size and
+peak RSS sampled every five seconds). Comparison children have separate logs.
+A SIGKILL or WSL/host shutdown cannot produce a final traceback; the last resource
+sample remains useful. Checkpoint and generation writes sync file contents and
+the containing directory before reporting success. Progress reads avoid memory
+mapping, which can produce SIGBUS if a file is truncated.
+
+Each run also writes `champions.json`, an index of its top ten distinct saved
+generation-champion genotypes, ranked only by training success (earliest generation
+breaks ties). Use `--champion-count 20` to change the collection size. Entries link
+to complete existing champion snapshots with inherited structure and mappings,
+learned mappings, and training/assessment traces. All generation champions remain
+saved, even when outside this index; repeated genotypes keep their best-scoring
+lifetime. Resume rebuilds the index from saved generations. This collection does
+not select on held-out scores or imply independent structural discoveries.
+
+## Learning-rule trace audit
+
+The [paired learning-event record](docs/records/learning-event/README.md) contains complete before/after
+distributions for observation, expectation, outcome, empirical feedback, delayed
+structural correction and the next prediction. The sensory model preserves the
+two-stage learning schedule but changes the prediction objective, output-policy
+coupling and shared structural credit assignment. Tooling parity does not imply
+identical learning dynamics. Reproduce with `./project trace-learning`.

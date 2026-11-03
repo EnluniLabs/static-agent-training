@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agent Lab · Model workspace</title><link rel="stylesheet" href="/assets/workspace.css"></head>
+<body>
+<header class="topbar"><a class="brand" href="/">A<span>∴</span> <div>AGENT LAB<small>Static structure. Learning systems.</small></div></a>
+<nav aria-label="Workspace"><button data-view="overview" class="active">Sessions</button><button data-view="setup">New session</button><button data-view="playground">Animal playground</button></nav>
+<span id="connection" class="connection" role="status">Connecting…</span></header>
+<div class="layout"><aside class="sidebar"><div class="section-heading"><h2>Session library</h2><button id="refresh" class="icon" aria-label="Refresh sessions">↻</button></div>
+<label class="sr-only" for="filter">Filter model sessions</label><select id="filter"><option value="all">All models & studies</option><option value="training">Categorical · evolution</option><option value="sensory-training">Fixed senses · evolution</option><option value="senses">Fixed senses · adaptation</option><option value="model-comparison">Evolutionary model comparison</option><option value="interfaces">Lifetime model benchmark</option><option value="comparison">Treatment comparisons</option></select>
+<label class="sr-only" for="search">Search sessions</label><input id="search" placeholder="Find a session…" type="search">
+<div id="session-list" class="session-list" aria-label="Saved sessions"></div>
+<p class="sidebar-note">Saved locally. Closing this window leaves sessions running.</p>
+<div class="legacy"><span>Existing views</span><a href="/playground">Classic playground ↗</a><a href="/runs">Training monitor ↗</a><a href="/comparisons">Treatment benchmarks ↗</a></div></aside>
+<main>
+<section id="view-overview" class="view"><div class="eyebrow">EXPERIMENT WORKSPACE</div>
+<div class="title-row"><div><h1 id="run-title">Your sessions, in one place.</h1><p id="run-subtitle">Choose a saved run or create a training session.</p></div><span id="run-state" class="badge">Ready</span></div>
+<p id="run-purpose" class="muted" hidden></p>
+<div class="action-row"><button id="open-model" class="secondary" disabled>Inspect model →</button><button id="stop-session" class="danger" hidden>Stop session</button><span id="resume-options" hidden><label>Generation target <input id="resume-generations" type="number" min="1" value="50"></label></span><button id="resume-session" class="secondary" hidden>Resume session</button><span id="ownership" class="muted"></span></div>
+<div id="overview-error" class="error" role="alert"></div><div id="metric-cards" class="metric-cards"></div>
+<article class="panel chart-panel"><div class="section-heading"><div><h2>Performance</h2><p id="chart-caption">Scores appear as results are saved.</p></div><span class="live-tag">SAVED RESULTS</span></div>
+<div id="chart-legend" class="legend"></div><svg id="trend" viewBox="0 0 1000 320" role="img" aria-label="Task success over session progress"></svg><p id="chart-note" class="muted"></p></article>
+<article id="results-panel" class="panel" hidden><h2>Independent seed results</h2><div id="results-table" class="table-scroll"></div></article>
+<article id="arms-panel" class="panel" hidden><h2>Training populations</h2><p>Open an arm to inspect its generational population means and saved champions.</p><div id="arms-table" class="table-scroll"></div></article>
+<article class="panel"><div class="section-heading"><h2>Session log</h2><select id="log-source" aria-label="Log source"><option value="output">Session output</option><option value="crash">Crash details</option><option value="resources">Resource samples</option></select></div><pre id="log-output" class="log">Select a session to inspect its output.</pre></article>
+<details class="panel"><summary>Configuration & saved artifacts</summary><div id="artifacts" class="artifact-list"></div><pre id="config-output" class="config">No session selected.</pre></details>
+<div id="limitations" class="notes"></div></section>
+
+<section id="view-setup" class="view" hidden><div class="eyebrow">START SOMETHING NEW</div><h1>Set up a session.</h1><p>Choose the model and learning procedure. Every session gets its own settings, results, and log.</p>
+<form id="launch-form" class="panel form-panel"><div class="form-grid"><label>Model family<select id="model-family"><option value="baseline">Old categorical model</option><option value="senses">Fixed-senses model</option><option value="both">Compare both models</option></select></label><label>Session type<select id="session-kind"></select></label></div>
+<p id="model-description" class="model-description"></p><label>Session name <span class="muted">optional</span><input id="session-name" maxlength="80" placeholder="e.g. larger sensory capacity"></label>
+<div id="session-fields" class="form-grid"></div><label>Purpose / notes<textarea id="session-notes" maxlength="2000" rows="3" placeholder="What question should this session answer?"></textarea></label>
+<div id="setup-summary" class="setup-summary"></div><div id="setup-error" class="error" role="alert"></div><button id="launch" class="primary" type="submit">Start session →</button><span id="launch-status" class="muted" role="status"></span></form>
+<div class="notes">Both models support evolutionary training with generations, mutation, selection and resumable checkpoints. Fixed-senses evaluation currently uses the Python evaluator. The separate lifetime benchmark keeps structure fixed.</div></section>
+
+<section id="view-playground" class="view" hidden><div class="eyebrow">OBSERVE A SAVED ANIMAL</div><h1>Same world. Different senses.</h1><p>Choose either model and a saved snapshot. Playback freezes learned parameters; it never changes a training session.</p>
+<article class="panel"><div class="form-grid"><label>Model<select id="play-model"><option value="baseline">Old categorical</option><option value="senses">Fixed senses</option></select></label><label>Source session<select id="play-run"></select></label></div><div class="snapshot-row"><label>Saved snapshot<select id="play-snapshot"></select></label><button id="refresh-models" type="button" class="secondary">Refresh snapshots</button><a id="export-model" hidden>Download model ↗</a></div><p id="snapshot-info" class="muted"></p>
+<form id="attempt-form"><div class="task-fields"><label>World<select id="play-world"><option value="original">Original [−20, 20]</option><option value="expanded">Expanded [−30, 30]</option></select></label><label>Policy<select id="policy"><option value="animal">Selected animal</option><option value="random">Random movement</option></select></label><label>Start<input id="start" type="number" value="12" min="-20" max="20" required></label><label>Goal<input id="goal" type="number" value="-3" min="-20" max="20" required></label><label>Seed<input id="attempt-seed" type="number" value="42" min="0" max="4294967295" required></label></div><div class="action-row"><button id="attempt" class="primary" disabled>Run attempt</button><button id="again" type="button" class="secondary" disabled>Try another seed</button></div></form><div id="play-error" class="error" role="alert"></div>
+<svg id="world-view" viewBox="0 0 1000 180" role="img" aria-label="Animal moving toward the selected goal"><g id="world-scale"></g><circle id="target" cy="80" r="16" fill="none" stroke="#71dbb5" stroke-width="3" visibility="hidden"/><circle id="animal" cy="80" r="10" fill="#83b5ff" visibility="hidden"/><text id="position" y="42" text-anchor="middle" fill="currentColor" font-size="22"></text></svg>
+<h2 id="frame-label" aria-live="polite">Select a snapshot to begin.</h2><p id="frame-detail" class="muted"></p>
+<div class="playback"><button id="play" type="button" disabled>Play</button><button id="step" type="button" disabled>Step</button><button id="restart" type="button" disabled>Restart</button><label>Speed<select id="speed"><option value="250">Normal</option><option value="70">Fast</option><option value="700">Slow</option></select></label><input id="scrub" type="range" min="0" max="0" value="0" aria-label="Output step"></div>
+</article><article id="sensory-panel" class="panel" hidden><div class="section-heading"><div><h2>Sensory activity</h2><p>The saved animal's fixed receptor bank.</p></div><span id="receptor-count" class="live-tag"></span></div><div class="legend"><span><i style="background:#83b5ff"></i>Observed</span><span><i style="background:#ffc780"></i>Predicted only</span><span><i style="background:#71dbb5"></i>Shared activation</span></div><div id="receptors" class="receptors" aria-label="Observed and predicted sensory activity"></div><p id="pair-detail" class="muted"></p></article>
+</section>
+</main></div><script src="/assets/workspace.js"></script></body></html>

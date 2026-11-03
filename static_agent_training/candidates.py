@@ -14,8 +14,22 @@ from .run_records import read_summary
 def best_saved(directory):
     """Ignore a generation until both its record and champion trace exist."""
     directory = Path(directory)
+    files = sorted((directory / 'generations').glob('*.json'))
+    index = directory / 'champions.json'
+    if files and index.is_file():
+        try:
+            if index.stat().st_mtime_ns >= files[-1].stat().st_mtime_ns:
+                entries = json.loads(index.read_text()).get('champions', [])
+                if entries:
+                    generation = entries[0]['generation']
+                    trace = directory / 'traces' / f'{generation:05d}-champion.json.gz'
+                    summary = read_summary(directory / 'generations' / f'{generation:05d}.json')
+                    if trace.is_file() and summary['best'] == entries[0]['training_success']:
+                        return summary
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
     best = None
-    for path in sorted((directory / 'generations').glob('*.json')):
+    for path in files:
         try:
             summary = read_summary(path)
             generation = summary['generation']
@@ -51,6 +65,16 @@ def load_saved_candidate(directory, generation=None):
     config = json.loads((directory / 'config.json').read_text())['config']
     result = trace['result']
     episodes = result['assessment']['episodes']
+    if config.get('model') == 'senses':
+        bundle = dict(schema_version='crt-sensory-candidate-v1', model='senses', generation=generation + 1,
+                      training_success=result['training']['fitness'], assessment_success=result['assessment']['fitness'],
+                      individual=trace['individual'], learned_model=trace['learned_model'], assessment_seed=result['seed'],
+                      encoding_seed=config['encoding_seed'], varying_goals=config.get('varying_goals', True),
+                      boundary_mode=config.get('boundary_mode', 'clamp'), episodes=episodes)
+        bundle['random_assessment_success'] = random_task_mean(
+            [e['start'] for e in episodes], [e.get('goal', 0) for e in episodes], boundary_mode=bundle['boundary_mode'])
+        attach_benchmark(bundle, benchmark_path)
+        return bundle
     bundle = dict(schema_version='crt-demo-v1', generation=generation+1,
                   training_success=result['training']['fitness'],
                   assessment_success=result['assessment']['fitness'],
@@ -82,6 +106,8 @@ class CandidateStore:
     def list(self):
         options = []
         for row in collect_runs(self.root):
+            if row.get('model') == 'senses':
+                continue
             best = best_saved(self.root / 'runs' / row['name'])
             options.append(dict(run_id=row['name'], name=row['name'], state=row['state'],
                                 population=row['population'], backend=row['backend'],

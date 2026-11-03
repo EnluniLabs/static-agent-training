@@ -46,8 +46,14 @@ class TrainingConfig:
     mutation: MutationConfig = field(default_factory=MutationConfig)
     development: DevelopmentConfig = field(default_factory=DevelopmentConfig)
     learning_config: LearningConfig = field(default_factory=LearningConfig)
+    model: str = 'categorical'
+    receptors: int = 256
 
     def __post_init__(self):
+        if self.model not in ('categorical', 'senses'):
+            raise ValueError('model must be categorical or senses')
+        if type(self.receptors) is not int or self.receptors < 16 or self.receptors % 16:
+            raise ValueError('receptors must be a positive multiple of 16')
         for name in ('population', 'generations', 'episodes', 'assessment_episodes',
                      'tournament_size', 'initial_pairs', 'workers', 'batch_size'):
             value = getattr(self, name)
@@ -99,9 +105,15 @@ def partitions(seed, *, include_zero=False):
 
 
 def initialize_population(config, progress=None):
-    vocabulary = NumberLine(encoding_seed=config.encoding_seed, goal_conditioned=config.varying_goals)
-    observations = [s.token for s in vocabulary.observation_tokens]
-    outputs = [o.token for o in vocabulary.output_tokens]
+    senses = None
+    if config.model == 'senses':
+        from .experimental.senses import FixedSenses
+        senses = FixedSenses(receptors=config.receptors)
+        observations, outputs = (), ()
+    else:
+        vocabulary = NumberLine(encoding_seed=config.encoding_seed, goal_conditioned=config.varying_goals)
+        observations = [s.token for s in vocabulary.observation_tokens]
+        outputs = [o.token for o in vocabulary.output_tokens]
     population = []
     for index in range(config.population):
         generated = initialize(Config(seed=derive(config.seed, 'initial', index), count=config.initial_pairs,
@@ -110,10 +122,18 @@ def initialize_population(config, progress=None):
         pairs = [(p['left']['ast'], p['right']['ast']) for p in generated['initial_pairs']]
         population.append(develop(pairs, observations, outputs, budgets=config.chain_budget,
                                   development_seed=derive(config.seed, 'initial-development', index),
-                                  mapping_seed=derive(config.seed, 'initial-mapping', index), config=config.development))
+                                  mapping_seed=derive(config.seed, 'initial-mapping', index), config=config.development,
+                                  senses=senses))
         if progress:
             progress(dict(phase='developing', completed=index + 1, total=config.population))
     return population
+
+
+def structural_population_id(population):
+    from dataclasses import asdict
+    value = [dict(initial_pairs=p.initial_pairs, budgets=p.budgets, repertoire=p.repertoire.to_data(),
+                  development_config=asdict(p.development_config)) for p in population]
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
 def generation_tasks(config, generation, split):
@@ -153,6 +173,9 @@ def generation_tasks(config, generation, split):
 
 
 def evaluate_generation(population, config, generation, split, progress=None, *, return_lifetime=False):
+    if config.model == 'senses':
+        from .experimental.sensory_evolution import evaluate_generation as evaluate_sensory_generation
+        return evaluate_sensory_generation(population, config, generation, split, progress, return_lifetime=return_lifetime)
     training_starts, assessment_starts, training_goals, assessment_goals = generation_tasks(config, generation, split)
     random_training = random_task_mean(training_starts, training_goals, boundary_mode=config.boundary_mode)
     random_assessment = random_task_mean(assessment_starts, assessment_goals, boundary_mode=config.boundary_mode)
@@ -234,6 +257,7 @@ def evaluate_generation(population, config, generation, split, progress=None, *,
     summary['unique_structures'] = len({describe(p) for p in population})
     summary['task_id'] = hashlib.sha256(json.dumps([training_starts,assessment_starts,training_goals,assessment_goals],separators=(',',':')).encode()).hexdigest()
     summary['population_id'] = hashlib.sha256(json.dumps([r['genotype_id'] for r in results],separators=(',',':')).encode()).hexdigest()
+    summary['structural_population_id'] = structural_population_id(population)
     sampling = dict(distribution=config.distance_distribution,
                     mean=config.distance_mean if config.distance_distribution == 'normal' else None,
                     stddev=config.distance_stddev if config.distance_distribution == 'normal' else None,

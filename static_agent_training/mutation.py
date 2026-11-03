@@ -6,7 +6,7 @@ import json
 import math
 import random
 
-from .genome import Species
+from .genome import Species, reconcile_mappings
 from .initialize import Config, depth, generate_term, is_closed, node_count, pair_id
 from .mappings import InheritedMappings
 from .repertoire import Repertoire
@@ -142,16 +142,14 @@ def mutate(parent, *, seed, config=None):
         from .engine import run
         development = run(pairs, budgets, seed=seeds['development'], **asdict(parent.development_config))
         repertoire = Repertoire.from_data(development['repertoire'])
-        inherited = InheritedMappings.initialize(repertoire, parent.inherited.observations,
-                                                 parent.inherited.outputs, seed=seeds['mapping'],
-                                                 previous=parent.inherited)
+        inherited = reconcile_mappings(parent.inherited, repertoire, seeds['mapping'])
         development_json = json.dumps(development, sort_keys=True)
     else:
         repertoire, inherited = parent.repertoire, parent.inherited
         development, development_json = old_development, parent.development_json
 
     weight_count = 0
-    if selected['weights']:
+    if selected['weights'] and isinstance(inherited, InheritedMappings):
         rng = random.Random(seeds['weights'])
         embedding = {s: dict(row) for s, row in inherited.embedding.items()}
         output = {q: dict(row) for q, row in inherited.output.items()}
@@ -163,6 +161,8 @@ def mutate(parent, *, seed, config=None):
                     weight_count += 1
         inherited = InheritedMappings(inherited.observations, inherited.outputs,
                                        inherited.pair_ids, embedding, output)
+    elif selected['weights']:
+        inherited, weight_count = inherited.perturb(seed=seeds['weights'], scale=config.weight_stddev)
     child = Species(tuple(pairs), tuple(budgets), inherited, repertoire,
                     parent.development_config, development_json)
     before, after = set(parent.repertoire.pairs), set(repertoire.pairs)

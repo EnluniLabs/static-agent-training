@@ -29,7 +29,15 @@ def write_json(path, data):
         with temporary.open('w', encoding='utf-8') as handle:
             json.dump(data, handle, sort_keys=True, separators=(',', ':'))
             handle.write('\n')
+    # gzip must close before syncing so its trailer is included.
+    with temporary.open('rb') as handle:
+        os.fsync(handle.fileno())
     os.replace(temporary, path)
+    directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
 
 
 def load_checkpoint(directory):
@@ -40,7 +48,52 @@ def load_checkpoint(directory):
     return data
 
 
-def run_experiment(config, directory, *, resume=False, until_generation=None, progress=None):
+def update_champion_collection(directory, count=10, record=None):
+    """Index distinct saved genotypes using training fitness and earliest ties."""
+    directory = Path(directory)
+    if type(count) is not int or count < 1:
+        raise ValueError('champion count must be a positive integer')
+    index = directory / 'champions.json'
+    entries = json.loads(index.read_text())['champions'] if record is not None and index.exists() else []
+    def saved_records():
+        for path in sorted((directory / 'generations').glob('*.json')):
+            try:
+                item = json.loads(path.read_text())
+                if 'generation' in item.get('summary', {}):
+                    yield item
+            except (OSError, ValueError):
+                continue
+    records = [record] if record is not None else saved_records()
+    for item in records:
+        generation = item['summary']['generation']
+        trace = f'traces/{generation:05d}-champion.json.gz'
+        if not (directory / trace).is_file():
+            continue
+        if 'individuals' in item:
+            result = item['individuals'][item['champion_index']]
+        else:
+            # Older runs may retain summary-only generation records.
+            try:
+                with gzip.open(directory / trace, 'rt', encoding='utf-8') as handle:
+                    result = json.load(handle)['result']
+            except (OSError, EOFError, ValueError, KeyError):
+                continue
+        entries.append(dict(generation=generation, individual_index=item.get('champion_index', result.get('index')),
+                            genotype_id=result['genotype_id'], trace=trace,
+                            training_success=result['training']['fitness'],
+                            assessment_success=result['assessment']['fitness']))
+    entries.sort(key=lambda row: (-row['training_success'], row['generation']))
+    unique = {}
+    for row in entries:
+        unique.setdefault(row['genotype_id'], row)
+    collection = dict(schema_version='crt-champion-collection-v1', count=count,
+                      selection='training fitness descending; earliest generation breaks ties; distinct genotype IDs',
+                      champions=list(unique.values())[:count])
+    write_json(index, collection)
+    return collection
+
+
+def run_experiment(config, directory, *, resume=False, until_generation=None, progress=None, champion_count=10):
     """Checkpoint the next inherited population after every completed generation.
 
     All random streams derive from saved seed and generation/individual indices,
@@ -48,6 +101,8 @@ def run_experiment(config, directory, *, resume=False, until_generation=None, pr
     `until_generation` allows a bounded segment without changing experiment config.
     """
     directory = Path(directory)
+    if type(champion_count) is not int or champion_count < 1:
+        raise ValueError('champion count must be a positive integer')
     if resume:
         state = load_checkpoint(directory)
         saved = TrainingConfig.from_data(state['config'])
@@ -73,10 +128,12 @@ def run_experiment(config, directory, *, resume=False, until_generation=None, pr
         write_json(directory / CHECKPOINT, state)
     speciation_state = state.get('speciation_state')
     write_json(directory / 'config.json', dict(config=asdict(config), partitions=split))
+    update_champion_collection(directory, champion_count)
     if progress:
         progress(dict(phase='ready', generation=first, history=history))
     last = config.generations if until_generation is None else min(config.generations, until_generation)
     for generation in range(first, last):
+        del state
         record, detail, lifetime_population = evaluate_generation(population, config, generation, split, progress, return_lifetime=True)
         champion = population[record['champion_index']]
         next_population, ancestry, species_report, speciation_state = reproduce(
@@ -99,12 +156,16 @@ def run_experiment(config, directory, *, resume=False, until_generation=None, pr
         write_json(directory / 'traces' / f'{generation:05d}-champion.json.gz',
                    dict(generation=generation, individual=champion.to_data(),
                         result=record['individuals'][record['champion_index']], **detail))
+        update_champion_collection(directory, champion_count, record)
         state = dict(schema_version='crt-training-v1', config=asdict(config), next_generation=generation + 1,
                      history=history, partitions=split, population=[p.to_data() for p in next_population], speciation_state=speciation_state)
         write_json(directory / CHECKPOINT, state)
         population = next_population
+        # Release the old serialized population and episode logs before the next
+        # evaluation constructs its arrays and learned weight copies.
         if progress:
             progress(dict(phase='generation-complete', generation=generation, summary=record['summary'], history=history))
+        del record, detail, lifetime_population, champion, next_population, ancestry
     if progress:
         progress(dict(phase='finished', history=history))
     return state
@@ -116,9 +177,12 @@ def main():
     parser.add_argument('--config', type=Path, help='full saved training configuration for a new run')
     parser.add_argument('--resume', type=Path)
     parser.add_argument('--population', type=int)
+    parser.add_argument('--model', choices=('categorical', 'senses'))
+    parser.add_argument('--receptors', type=int)
     parser.add_argument('--generations', type=int)
     parser.add_argument('--episodes', type=int)
     parser.add_argument('--assessment-episodes', type=int)
+    parser.add_argument('--champion-count', type=int, default=10, help='number of distinct generation champions indexed by training success')
     parser.add_argument('--elites', type=int)
     parser.add_argument('--tournament-size', type=int)
     parser.add_argument('--seed', type=int)
@@ -136,12 +200,13 @@ def main():
     parser.add_argument('--no-learning', action='store_true', default=None)
     parser.add_argument('--inherit-lifetime', action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument('--fixed-goal', action='store_true', default=None, help='use the legacy zero-target task')
+    parser.add_argument('--memory-limit-mb', type=int, default=4096, help='process address-space ceiling in MiB')
     parser.add_argument('--no-live', action='store_true', help='print generation summaries instead of redrawing a graph')
     args = parser.parse_args()
     try:
         if args.resume:
             if any(getattr(args, name) is not None for name in
-                   ('output', 'config', 'population', 'episodes', 'assessment_episodes', 'elites',
+                   ('output', 'config', 'population', 'model', 'receptors', 'episodes', 'assessment_episodes', 'elites',
                     'tournament_size', 'seed', 'no_learning', 'fixed_goal', 'backend', 'workers', 'batch_size', 'distance_distribution', 'distance_mean', 'distance_stddev', 'speciation', 'speciation_threshold', 'max_species', 'boundary_mode', 'include_zero', 'inherit_lifetime')):
                 parser.error('resume uses saved configuration; only --generations and --no-live may override')
             config = TrainingConfig.from_data(load_checkpoint(args.resume)['config'])
@@ -150,7 +215,7 @@ def main():
             directory = args.resume
         else:
             values = {name: getattr(args, name) for name in
-                      ('population', 'generations', 'episodes', 'assessment_episodes', 'elites', 'tournament_size', 'seed', 'backend', 'workers', 'batch_size', 'distance_distribution', 'distance_mean', 'distance_stddev', 'speciation', 'speciation_threshold', 'max_species', 'boundary_mode', 'include_zero', 'inherit_lifetime')
+                      ('population', 'model', 'receptors', 'generations', 'episodes', 'assessment_episodes', 'elites', 'tournament_size', 'seed', 'backend', 'workers', 'batch_size', 'distance_distribution', 'distance_mean', 'distance_stddev', 'speciation', 'speciation_threshold', 'max_species', 'boundary_mode', 'include_zero', 'inherit_lifetime')
                       if getattr(args, name) is not None}
             if 'population' in values and 'elites' not in values:
                 values['elites'] = min(5, values['population'] - 1)
@@ -163,7 +228,9 @@ def main():
         dashboard = Dashboard(config, live=not args.no_live)
         print(f'Run directory: {directory}', flush=True)
         try:
-            run_experiment(config, directory, resume=bool(args.resume), progress=dashboard)
+            from .diagnostics import diagnostics
+            with diagnostics(directory, args.memory_limit_mb):
+                run_experiment(config, directory, resume=bool(args.resume), progress=dashboard, champion_count=args.champion_count)
         except KeyboardInterrupt:
             dashboard(dict(phase='interrupted'))
             if (directory / CHECKPOINT).exists():
