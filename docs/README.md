@@ -10,6 +10,10 @@
 | [Fixed-senses design](AGNOSTIC_INTERFACE.md) | Implemented experimental sensory model |
 | [Learning-event comparison](records/learning-event/README.md) | Full before/after distributions and learning-rule differences |
 | [Fixed-senses audit](AGNOSTIC_INTERFACE_AUDIT.md) | Gaps between prototype and intended research design |
+| [Research roadmap](RESEARCH_ROADMAP.md) | Staged research priorities |
+| [Three core experiments](THREE_CORE_EXPERIMENTS.md) | Main controlled research questions |
+| [Coherent versus random test](COHERENT_VS_RANDOM_TEST_SPEC.md) | Matched repertoire hypothesis test |
+| [Inherited animal proposal](REPERTOIRE_LIBRARIES_AND_INHERITED_ANIMAL.md) | Reusable repertoire research proposal |
 | [Future work](../FUTURE_WORK.md) | Hypotheses and proposed experiments; not live run status |
 | [Learning experiment plan](LEARNING_EXPERIMENT_PLAN.md) | Selection, retained adaptation and inheritance controls |
 | [Experiment history](EXPERIMENTS.md) | Dated historical studies, not a live registry |
