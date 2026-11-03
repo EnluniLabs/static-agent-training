@@ -11,6 +11,8 @@ from .evolution import TrainingConfig, evaluate_generation, initialize_populatio
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--models', nargs='+', choices=['categorical', 'senses'], default=['categorical'])
+    parser.add_argument('--receptors', type=int, default=256)
     parser.add_argument('--populations', type=int, nargs='+', default=[64, 256, 1024])
     parser.add_argument('--episodes', type=int, default=50)
     parser.add_argument('--assessment-episodes', type=int, default=50)
@@ -26,30 +28,32 @@ def main():
     config = TrainingConfig(population=max(args.populations), elites=min(5, max(args.populations)-1),
                             generations=1, episodes=args.episodes, assessment_episodes=args.assessment_episodes,
                             workers=args.workers, batch_size=args.batch_size, seed=42)
-    print(f'Initializing {config.population} independent genotypes...', flush=True)
-    started = time.perf_counter()
-    population = initialize_population(config)
-    initialization = time.perf_counter()-started
-    split = partitions(config.seed)
-    # Compile / initialize libraries outside steady-state measurements.
-    for backend in args.backends:
-        if backend != 'python':
-            evaluate_generation(population[:2], replace(config, population=2, elites=1, episodes=2,
-                                                        assessment_episodes=2, backend=backend), 0, split)
-    measurements = []
-    for size in args.populations:
+    measurements, initialization = [], {}
+    for model in args.models:
+        config = replace(config, model=model, receptors=args.receptors)
+        print(f'Initializing {config.population} independent genotypes...', flush=True)
+        started = time.perf_counter()
+        population = initialize_population(config)
+        initialization[model] = time.perf_counter()-started
+        split = partitions(config.seed)
+        # Compile / initialize libraries outside steady-state measurements.
         for backend in args.backends:
-            if backend == 'python' and size > args.python_limit:
-                continue
-            times = []
-            for repeat in range(args.repeats):
-                started = time.perf_counter()
-                record, _ = evaluate_generation(population[:size], replace(config, population=size,
-                                                       elites=min(5, size-1), backend=backend), 0, split)
-                times.append(time.perf_counter()-started)
-                print(f'{size:4} animals | {backend:6} | {times[-1]:.3f}s | repeat {repeat+1}/{args.repeats}', flush=True)
-            measurements.append(dict(population=size, backend=backend, seconds=times,
-                                     median_seconds=statistics.median(times), summary=record['summary']))
+            if backend != 'python':
+                evaluate_generation(population[:2], replace(config, population=2, elites=1, episodes=2,
+                                                            assessment_episodes=2, backend=backend), 0, split)
+        for size in args.populations:
+            for backend in args.backends:
+                if backend == 'python' and size > args.python_limit:
+                    continue
+                times = []
+                for repeat in range(args.repeats):
+                    started = time.perf_counter()
+                    record, _ = evaluate_generation(population[:size], replace(config, population=size,
+                                                           elites=min(5, size-1), backend=backend), 0, split)
+                    times.append(time.perf_counter()-started)
+                    print(f'{model} | {size:4} animals | {backend:6} | {times[-1]:.3f}s | repeat {repeat+1}/{args.repeats}', flush=True)
+                measurements.append(dict(model=model, population=size, backend=backend, seconds=times,
+                                         median_seconds=statistics.median(times), summary=record['summary']))
     result = dict(seed=config.seed, episodes=args.episodes, assessment_episodes=args.assessment_episodes,
                   workers=args.workers, batch_size=args.batch_size, initialization_seconds=initialization,
                   scope='whole generation evaluation including packing, reference RNG generation, transfers, and champion replay; excludes reproduction and checkpoint writes; warm compilation',

@@ -1,5 +1,10 @@
 # Experiment record
 
+This is a dated historical record. Use `./project runs`, `./project status`, and
+`./project show RUN` for current local artifacts and process status; see
+[USE.md](../USE.md). Pending/running descriptions below reflect when they were
+written and are not a live registry.
+
 All results below were collected locally on 2026-11-01. They are implementation
 experiments, not proof of the underlying theory. Machine-readable summaries are
 in [results](results/). Raw run directories and checkpoints are not committed.
@@ -182,3 +187,18 @@ Both existing local update rules are disabled/enabled together; their formulas
 are unchanged. Final assessment freezes weights in both arms. This study tests
 learning during evolution; deployment-time adaptation remains a separate future
 test. Results are pending in `/comparisons`; no final winner is claimed.
+
+
+## Inheritance comparison rerun
+
+At the user’s request, `inherited-learning-rerun-20261101-170747` starts a fresh
+200-generation learned-weight inheritance off/on comparison across seeds 42/43/44.
+Both arms enable lifetime learning and disable speciation. The configuration
+matches the earlier longer inheritance study: 256 animals per arm, 100 training
+and 200 frozen assessment episodes, 2,000 final shared held-out trials, uniform
+pairs, hard walls, and native CPU evaluation with four workers per arm.
+The earlier stopped study is preserved separately. Reusing its seeds makes this
+a repeat of the same seeded trajectories, not additional independent replication.
+This run is intended to complete all three seed pairs before interpreting the
+aggregate effect. Results are pending in `/comparisons`; no agent, learning, or
+mutation rules were changed.

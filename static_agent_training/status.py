@@ -72,6 +72,7 @@ def collect_runs(root=ROOT, *, processes=None, now=None):
                 remaining = max(0, seconds_per_generation*(config['generations']-completed)-min(since_last, seconds_per_generation))
             updated = records[-1].stat().st_mtime if records else config_path.stat().st_mtime
             rows.append(dict(name=directory.name, state=state, completed=completed,
+                             model=config.get('model', 'categorical'), receptors=config.get('receptors'),
                              target=config['generations'], population=config['population'],
                              backend=config.get('backend', 'python'), learning=config.get('learning', True), inherit_lifetime=config.get('inherit_lifetime',False), speciation=config.get('speciation', False),
                              progress=min(1, completed/config['generations']), summary=latest,
@@ -100,6 +101,8 @@ def render(rows):
         line = f"{row['state'].upper():10} {row['completed']:3}/{row['target']:<3} ({row['progress']:.0%})  {row['name']}"
         lines.append(line)
         details = [f"population {row['population']}", row['backend'], 'speciation on' if row['speciation'] else 'speciation off', 'learning on' if row['learning'] else 'learning off', 'inherit learning' if row['inherit_lifetime'] else 'no learned inheritance']
+        if row.get('model') == 'senses':
+            details.insert(0, f"fixed senses ({row.get('receptors', 256)} receptors)")
         if summary:
             details += [f"mean {summary['mean']:.1%}", f"best {summary['best']:.1%}",
                         f"held-out {summary['assessment_mean']:.1%}"]
@@ -135,7 +138,7 @@ RUNS_PAGE = '''<!doctype html><html lang="en"><meta charset="utf-8">
 <style>
 :root{color-scheme:dark}body{font:17px system-ui;background:#101725;color:#eef4ff;max-width:1050px;margin:35px auto;padding:20px}h1{font-size:32px}p{color:#b8c5d8;line-height:1.5}a{color:#7fc4ff}button{font:inherit;background:#24344d;border:1px solid #62738e;color:white;padding:10px 15px;border-radius:8px;cursor:pointer}article{background:#182438;border:1px solid #344762;border-radius:14px;padding:22px;margin:18px 0}h2{font-size:20px;overflow-wrap:anywhere;margin:0 0 15px}.badge{font-weight:600;color:#b8c5d8}.running{color:#64db9f}.stopped{color:#ffc280}progress{width:100%;height:24px;accent-color:#65baff}.metrics{display:flex;gap:24px;flex-wrap:wrap;margin:20px 0}.metric strong{font-size:25px;display:block}.metric span{color:#b8c5d8;font-size:14px}.small{font-size:14px;color:#b8c5d8}#connection{min-height:24px}
 </style>
-<a href="/">← Animal playground</a> · <a href="/comparisons">Benchmarks</a><h1>Training runs</h1>
+<a href="/">← Model workspace</a> · <a href="/playground">Animal playground</a> · <a href="/comparisons">Benchmarks</a><h1>Training runs</h1>
 <p>Live status of background training. Refreshes every 5 seconds. Closing this page leaves training running.</p>
 <button id="refresh">Refresh now</button><p id="connection" role="status">Loading runs…</p><main id="runs"></main>
 <script>

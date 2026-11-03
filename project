@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+"""Project commands, using the local virtual environment when available."""
+import os
+from pathlib import Path
+import sys
+
+
+if __name__ == '__main__':
+    root = Path(__file__).resolve().parent
+    python = root / '.venv' / 'bin' / 'python'
+    if python.exists() and Path(sys.prefix).resolve() != (root / '.venv').resolve():
+        os.execv(str(python), [str(python), str(Path(__file__).resolve()), *sys.argv[1:]])
+    from static_agent_training.cli import main
+    main(root)

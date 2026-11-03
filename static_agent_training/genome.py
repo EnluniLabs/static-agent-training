@@ -35,7 +35,8 @@ class Species:
             raise ValueError('species requires closed starting pairs')
         if len(budgets) != len(pairs) or any(type(b) is not int or b < 0 for b in budgets):
             raise ValueError('species requires one nonnegative budget per starting pair')
-        if not isinstance(self.inherited, InheritedMappings):
+        from .experimental.sensory_genome import SensoryMappings
+        if not isinstance(self.inherited, (InheritedMappings, SensoryMappings)):
             raise TypeError('species must contain inherited mappings, never lifetime mappings')
         if set(self.inherited.pair_ids) != set(self.repertoire.pairs):
             raise ValueError('inherited mappings must match the repertoire')
@@ -60,23 +61,42 @@ class Species:
         if data['schema_version'] != 'crt-species-v1':
             raise ValueError('unsupported species schema')
         return cls(tuple(data['initial_pairs']), tuple(data['budgets']),
-                   InheritedMappings.from_data(data['inherited']),
+                   mappings_from_data(data['inherited']),
                    Repertoire.from_data(data['repertoire']),
                    DevelopmentConfig(**data['development_config']),
                    json.dumps(data['development'], sort_keys=True))
 
 
 def develop(initial_pairs, observations, outputs, *, budgets=64, development_seed=0,
-            mapping_seed=0, config=None):
+            mapping_seed=0, config=None, senses=None):
     """Initial development; lifetime code never needs to call this function."""
     from .engine import run
 
     config = config or DevelopmentConfig()
     result = run(initial_pairs, budgets, seed=development_seed, **asdict(config))
     repertoire = Repertoire.from_data(result['repertoire'])
-    inherited = InheritedMappings.initialize(repertoire, observations, outputs, seed=mapping_seed)
+    if senses is None:
+        inherited = InheritedMappings.initialize(repertoire, observations, outputs, seed=mapping_seed)
+    else:
+        from .experimental.sensory_genome import SensoryMappings
+        inherited = SensoryMappings.initialize(repertoire, senses=senses, seed=mapping_seed)
     return Species(tuple(result['initial_pairs']), tuple(result['initial_budgets']), inherited,
                    repertoire, config, json.dumps(result, sort_keys=True))
+
+
+def mappings_from_data(data):
+    if data.get('schema_version') == 'crt-sensory-mappings-v1':
+        from .experimental.sensory_genome import SensoryMappings
+        return SensoryMappings.from_data(data)
+    return InheritedMappings.from_data(data)
+
+
+def reconcile_mappings(previous, repertoire, seed):
+    if isinstance(previous, InheritedMappings):
+        return InheritedMappings.initialize(repertoire, previous.observations, previous.outputs,
+                                            previous=previous, seed=seed)
+    from .experimental.sensory_genome import SensoryMappings
+    return SensoryMappings.initialize(repertoire, senses=previous.senses, previous=previous, seed=seed)
 
 
 def inherit_lifetime_mappings(parent, embedding, output):

@@ -65,6 +65,12 @@ def _cuda_kernel(capacity):
         raise ValueError('CUDA evaluation requires CuPy; install requirements-cuda.txt in the virtual environment') from error
 
 
+def _check_allocation(size_bytes):
+    # Keep a single evaluator allocation well below the CLI process ceiling.
+    if size_bytes > 512 * 1024 * 1024:
+        raise MemoryError('Evaluator arrays exceed the 512 MiB safety budget; reduce --batch-size or episode counts')
+
+
 def _pack(population, encoding_seed):
     np = _numpy()
     conditioned = any(s.startswith('goal_') for s in population[0].inherited.observations)
@@ -75,6 +81,7 @@ def _pack(population, encoding_seed):
     capacity = 1 << max(0, max(len(p.repertoire.pairs) for p in population)-1).bit_length()
     if capacity > 4096:
         raise ValueError('Accelerated evaluator supports at most 4096 pairs per animal')
+    _check_allocation(size * capacity * ((len(observations) + 50) * 8 + 4))
     embedding = np.zeros((size, len(observations), capacity), dtype=np.float64)
     output = np.zeros((size, capacity, 50), dtype=np.float64)
     edges = np.full((size, capacity), -1, dtype=np.int32)
@@ -111,6 +118,7 @@ def _phase(arrays, seeds, starts, goals, *, phase, learning, learning_config, ba
     embedding, output, edges, sizes, *encoding = arrays
     batch, signals, capacity = embedding.shape
     count = len(starts)
+    _check_allocation(sum(a.nbytes for a in arrays) * 3 + batch * count * 11 * 8)
     metrics = np.zeros((batch, count, 11), dtype=np.float64)
     revised = np.zeros((batch, capacity), dtype=np.uint8)
     inputs = [embedding, output, edges, sizes, *encoding,
@@ -159,6 +167,13 @@ def _unpack(metrics, starts, goals):
 def evaluate_batch(population, training_starts, assessment_starts, *, seeds, encoding_seed=0,
                    training_goals=None, assessment_goals=None, learning=True, learning_config=None,
                    backend='native', workers=8, return_weights=False, boundary_mode='clamp'):
+    from .experimental.sensory_genome import SensoryMappings
+    if population and isinstance(population[0].inherited, SensoryMappings):
+        from .experimental.sensory_accelerated import evaluate_batch as sensory_batch
+        return sensory_batch(population, training_starts, assessment_starts, seeds=seeds,
+            encoding_seed=encoding_seed, training_goals=training_goals, assessment_goals=assessment_goals,
+            learning=learning, learning_config=learning_config, backend=backend, workers=workers,
+            return_weights=return_weights, boundary_mode=boundary_mode)
     from .learning import LearningConfig
     if not population or len(seeds) != len(population):
         raise ValueError('require a seed for each member of a nonempty batch')
@@ -212,6 +227,11 @@ def assert_equivalent(actual, expected, path='result'):
 
 def evaluate_frozen(population, starts, goals, *, seeds, encoding_seed=0, backend='native', workers=8, boundary_mode='clamp'):
     """Assess supplied immutable weights on arbitrary tasks, with no training block."""
+    from .experimental.sensory_genome import SensoryMappings
+    if population and isinstance(population[0].inherited, SensoryMappings):
+        from .experimental.sensory_accelerated import evaluate_frozen as sensory_frozen
+        return sensory_frozen(population, starts, goals, seeds=seeds, encoding_seed=encoding_seed,
+                              backend=backend, workers=workers, boundary_mode=boundary_mode)
     from .learning import LearningConfig
     if not population or len(population)!=len(seeds) or not starts or len(starts)!=len(goals):
         raise ValueError('require nonempty matching populations, seeds, and tasks')

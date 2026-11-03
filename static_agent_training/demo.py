@@ -57,6 +57,31 @@ def export_demo(directory):
     with gzip.open(directory / 'traces' / f'{generation:05d}-champion.json.gz', 'rt') as handle:
         trace = json.load(handle)
     config = json.loads((directory / 'config.json').read_text())['config']
+    if config.get('model') == 'senses':
+        from .candidates import load_saved_candidate
+        from .experimental.bit_model import BitModel
+        from .experimental.sensory_playback import record_episode
+        bundle = load_saved_candidate(directory, generation)
+        model = BitModel.from_data(bundle['learned_model'])
+        seed = trace['result']['seed']
+        model.embedding_rng.seed(derive(seed, 'assessment', 'embedding'))
+        model.output_rng.seed(derive(seed, 'assessment', 'output'))
+        episodes = []
+        for expected in trace['result']['assessment']['episodes']:
+            frames = record_episode(model, expected['start'], expected['goal'],
+                encoding_seed=bundle['encoding_seed'], boundary_mode=bundle['boundary_mode'],
+                goal_conditioned=bundle['varying_goals'])
+            if (frames[-1]['success'], frames[-1]['reason']) != (expected['success'], expected['reason']):
+                raise ValueError('sensory assessment replay does not match saved result')
+            episodes.append(dict(start=expected['start'], goal=expected['goal'], frames=frames))
+            model.events.clear()
+        bundle['episodes'] = episodes
+        destination = directory / 'demo'
+        destination.mkdir(exist_ok=True)
+        (destination / 'champion.json').write_text(json.dumps(bundle, separators=(',', ':')) + '\n')
+        view = {k:bundle[k] for k in ('generation','training_success','assessment_success','episodes')}
+        (destination / 'index.html').write_text(HTML.replace('__DATA__', json.dumps(view).replace('<', '\\u003c')))
+        return destination, bundle
     species = Species.from_data(trace['individual'])
     mappings = species.inherited.lifetime()
     mappings.embedding = trace['learned_embedding']

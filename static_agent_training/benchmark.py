@@ -48,6 +48,9 @@ def compare(directory, *, episodes=2000, seed=20261101):
             start = task_rng.choice(split)
             goal = task_rng.choice([g for g in split if g != start]) if conditioned else 0
             tasks.append((start, goal))
+    if bundle.get('model') == 'senses':
+        from .experimental.sensory_evolution import benchmark
+        return benchmark(directory, bundle, tasks, seed=seed)
     species = Species.from_data(bundle['individual'])
     maps = species.inherited.lifetime()
     maps.embedding = {k: dict(v) for k, v in bundle['learned_embedding'].items()}

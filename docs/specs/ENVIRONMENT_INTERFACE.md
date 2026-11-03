@@ -96,5 +96,5 @@ with the newer configurable episode counts described in the README.
 future viewer. The agent adapter must never receive this privileged data.
 The environment provides correctness records; update rules belong to the agent.
 
-See [implementation boundaries](docs/IMPLEMENTATION.md) for the current training
-contract and [bias audit](docs/BIAS_AUDIT.md) for evaluation limitations.
+See [implementation boundaries](../IMPLEMENTATION.md) for the current training
+contract and [bias audit](../BIAS_AUDIT.md) for evaluation limitations.

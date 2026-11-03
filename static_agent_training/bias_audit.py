@@ -64,6 +64,10 @@ def audit_checkpoint(source, *, sample=128, sample_seed=20261101, repeats=10, ba
         return_weights=True, boundary_mode=config.boundary_mode)
     frozen = []
     for lane, species in enumerate(population):
+        if config.model == "senses":
+            from .experimental.sensory_accelerated import learned_mappings
+            frozen.append(replace(species, inherited=learned_mappings(species, learned, lane)))
+            continue
         inherited = species.inherited
         ids = inherited.pair_ids
         embedding = {s: {q: float(learned[0][lane, i, j]) for j, q in enumerate(ids)}
@@ -79,6 +83,9 @@ def audit_checkpoint(source, *, sample=128, sample_seed=20261101, repeats=10, ba
     for mode in ('correct_goal', 'permuted_goal_input', 'goal_input_removed'):
         members = []
         for species in frozen:
+            if config.model == "senses":
+                members.append(species)
+                continue
             data = species.inherited.to_data()
             old = data['embedding']
             if mode == 'permuted_goal_input':
@@ -91,11 +98,16 @@ def audit_checkpoint(source, *, sample=128, sample_seed=20261101, repeats=10, ba
             members.append(replace(species, inherited=InheritedMappings.from_data(data)))
         settings = dict(seeds=seeds, encoding_seed=config.encoding_seed, backend=backend,
                         workers=workers, boundary_mode=config.boundary_mode)
-        scores = evaluate_frozen(members, assessment, assessment_goals, **settings)
+        evaluator = evaluate_frozen
+        if config.model == "senses":
+            from .experimental.sensory_accelerated import evaluate_frozen as evaluator
+            settings.update(goal_conditioned=mode != "goal_input_removed",
+                            goal_permutation=permutation if mode == "permuted_goal_input" else None)
+        scores = evaluator(members, assessment, assessment_goals, **settings)
         if mode == 'correct_goal':
             for actual, reference in zip(scores, results):
                 assert_equivalent(actual, reference['assessment'])
-        fresh = evaluate_frozen(members, [s for s, g in exhaustive], [g for s, g in exhaustive], **settings)
+        fresh = evaluator(members, [s for s, g in exhaustive], [g for s, g in exhaustive], **settings)
         rates = [r['fitness'] for r in scores]
         controls[mode] = dict(fixed_assessment_mean=statistics.mean(rates),
                               exhaustive_heldout_mean=statistics.mean(r['fitness'] for r in fresh),

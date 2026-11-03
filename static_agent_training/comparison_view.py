@@ -2,7 +2,7 @@
 PAGE='''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Evolution benchmarks</title><style>
 :root{color-scheme:dark}body{font:17px system-ui;background:#101725;color:#eef4ff;max-width:1200px;margin:30px auto;padding:20px}a{color:#7fc4ff}p{color:#b8c5d8;line-height:1.5}article{background:#182438;border:1px solid #344762;border-radius:14px;padding:22px;margin:25px 0}h2{overflow-wrap:anywhere;font-size:23px}table{border-collapse:collapse;width:100%;font-size:15px}td,th{text-align:left;border-bottom:1px solid #344762;padding:12px 8px}th{color:#b8c5d8}.scroll{overflow:auto}.effect{font-size:23px;color:#eef4ff}.small{font-size:14px}progress{width:100%;height:22px;accent-color:#65baff}button{font:inherit;background:#24344d;color:white;border:1px solid #62738e;border-radius:8px;padding:10px;cursor:pointer}
-</style><a href="/">Animal playground</a> · <a href="/runs">Training runs</a><h1>Evolution benchmarks</h1>
+</style><a href="/">Model workspace</a> · <a href="/playground">Animal playground</a> · <a href="/runs">Training runs</a><h1>Evolution benchmarks</h1>
 <p>Paired experiments share initial genotypes, task sequences, mutation settings, elite counts, and evaluation budgets. Only the selected treatment—lifetime learning, learned-weight inheritance, or speciation—is switched on or off.</p>
 <p>The primary result tests each run's highest-training saved candidate on fresh shared held-out trials with learned weights frozen. Uncertainty is calculated across paired seeds. Held-out scores do not influence selection.</p>
 <button id="refresh">Refresh now</button><p id="connection" role="status">Loading…</p><main id="studies"></main>
