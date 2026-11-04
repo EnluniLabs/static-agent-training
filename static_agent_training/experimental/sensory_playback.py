@@ -5,11 +5,12 @@ from .bit_model import BitModel
 from .number_line import StimulusNumberLine
 from .senses import SensoryAdapter
 from .signals import Action, Prediction, Step
+from ..environments import environment_spec
 from ..seeds import derive
 
 
 def record_episode(model, start, goal, *, encoding_seed=0, boundary_mode='clamp', goal_conditioned=True,
-                   lower=-20, upper=20, random_rng=None):
+                   lower=-20, upper=20, random_rng=None, learn=False):
     raw = StimulusNumberLine(lower=lower,upper=upper,encoding_seed=encoding_seed,
                              boundary_mode=boundary_mode,goal_conditioned=goal_conditioned)
     world = SensoryAdapter(raw,model.senses)
@@ -28,7 +29,7 @@ def record_episode(model, start, goal, *, encoding_seed=0, boundary_mode='clamp'
         if transition.frame is not None:
             model.observe(transition.frame)
         offset=len(model.events)
-        emission=Action(random_rng.randrange(9)) if random_rng is not None else model.emit(learn=False)
+        emission=Action(random_rng.randrange(9)) if random_rng is not None else model.emit(learn=learn)
         internal+=1
         if emission is None:
             transition=Step(None,done=True,reason='chain_terminated');record('Chain ended',transition)
@@ -37,16 +38,19 @@ def record_episode(model, start, goal, *, encoding_seed=0, boundary_mode='clamp'
             record('Predict next sensory pattern',transition,emission.signal)
         else:
             old=raw.position;move=raw.moves[emission.index]
-            transition=world.step(emission);model.receive(transition.frame,learn=False)
+            transition=world.step(emission);model.receive(transition.frame,learn=learn)
             label=f'Move {move:+d}'
             if boundary_mode=='clamp' and not lower<=old+move<=upper:
                 label+=' (stopped at wall)'
             record(label,transition,events=model.events[offset:]);internal=0
-    model.receive(None,learn=False);model.reset_episode()
+    model.receive(None,learn=learn);model.reset_episode()
     return frames
 
 
-def attempt(bundle,start,goal,seed,policy='animal',*,lower=-20,upper=20):
+def attempt(bundle,start,goal,seed,policy='animal',*,lower=None,upper=None):
+    spec = environment_spec(bundle.get('environment','original'))
+    lower = spec.lower if lower is None else lower
+    upper = spec.upper if upper is None else upper
     from ..baseline import random_success
     model=BitModel.from_data(bundle['learned_model'])
     model.events.clear()
@@ -59,4 +63,4 @@ def attempt(bundle,start,goal,seed,policy='animal',*,lower=-20,upper=20):
     if model.parameters()!=bundle['learned_model']['parameters']:
         raise AssertionError('Playback modified learned parameters')
     return dict(start=start,goal=goal,seed=seed,policy=policy,model='senses',frames=frames,lower=lower,upper=upper,
-                boundary_mode=boundary,random_expected_success=random_success(start,goal,boundary_mode=boundary) if lower==-20 and upper==20 else None)
+                boundary_mode=boundary,random_expected_success=random_success(start,goal,boundary_mode=boundary,lower=lower,upper=upper))

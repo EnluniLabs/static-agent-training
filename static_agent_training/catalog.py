@@ -60,7 +60,17 @@ def catalog(root, *, processes=None):
         report = read_json(path)
         schema = report.get('schema_version', '')
         progress = None
-        if schema == 'crt-interface-comparison-v1':
+        if schema == 'crt-frozen-assessment-v1':
+            kind='assessment'
+            state=sensory_state(path.parent,report,module='static_agent_training.assessments')
+            progress=f"{report.get('progress',{}).get('completed_animals',0)}/{report.get('progress',{}).get('total_animals',0)} candidates"
+            summary={'populations':len(report.get('populations',[])),'environment':report.get('config',{}).get('environment','original')}
+        elif schema == 'crt-population-benchmark-v1':
+            kind='population-benchmark'
+            state=sensory_state(path.parent,report,module='static_agent_training.populations')
+            progress=str(len(report.get('populations',[])))+' populations'
+            summary={'populations':len(report.get('populations',[])),'environment':report.get('config',{}).get('environment','original')}
+        elif schema == 'crt-interface-comparison-v1':
             kind = 'interfaces'
             state = sensory_state(path.parent, report, module='static_agent_training.experimental.model_comparison')
             progress = f"{report.get('completed', 0)}/{report.get('target', 0)}"
@@ -74,7 +84,7 @@ def catalog(root, *, processes=None):
                                name: result.get('frozen_evaluation', {}).get('expanded', {}).get('success_rate')
                                for name, result in report.get('results', {}).items()})
         elif schema in ('crt-treatment-comparison-v1', 'crt-speciation-comparison-v1'):
-            kind, state = ('model-comparison' if report.get('treatment') == 'model' else 'comparison'), report.get('status', 'unknown')
+            kind, state = ('starting-population-benchmark' if report.get('treatment')=='starting-population' else 'model-comparison' if report.get('treatment') == 'model' else 'comparison'), report.get('status', 'unknown')
             if state == 'running':
                 state = 'recorded-running'  # A historical report is not a live-process check.
             summary = {key: report.get(key) for key in ('treatment', 'seeds', 'paired_effect')}

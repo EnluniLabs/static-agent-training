@@ -9,6 +9,7 @@ from pathlib import Path
 import random
 import statistics
 
+from .environments import environment_spec
 from .accelerated import assert_equivalent, evaluate_batch, evaluate_frozen
 from .evolution import TrainingConfig, generation_tasks
 from .genome import Species
@@ -16,11 +17,11 @@ from .mappings import InheritedMappings
 from .seeds import derive
 
 
-def movement_baseline(tasks, moves, boundary_mode):
+def movement_baseline(tasks, moves, boundary_mode, lower=-20, upper=20):
     """Exact success for a goal-independent uniform choice among supplied moves."""
     @lru_cache(maxsize=None)
     def probability(position, goal, remaining):
-        if not -20 <= position <= 20:
+        if not lower <= position <= upper:
             return 0.0
         if position == goal:
             return 1.0
@@ -28,7 +29,7 @@ def movement_baseline(tasks, moves, boundary_mode):
             return 0.0
         destinations = [position + move for move in moves]
         if boundary_mode == 'clamp':
-            destinations = [max(-20, min(20, x)) for x in destinations]
+            destinations = [max(lower, min(upper, x)) for x in destinations]
         return sum(probability(x, goal, remaining - 1) for x in destinations) / len(moves)
     return statistics.mean(probability(start, goal, 12) for start, goal in tasks)
 
@@ -50,6 +51,7 @@ def audit_checkpoint(source, *, sample=128, sample_seed=20261101, repeats=10, ba
     if state['schema_version'] != 'crt-training-v1':
         raise ValueError('unsupported checkpoint schema')
     config = TrainingConfig.from_data(state['config'])
+    spec = environment_spec(config.environment)
     if not config.varying_goals:
         raise ValueError('goal-input audit requires a varying-goal run')
     generation = state['next_generation']
@@ -61,7 +63,7 @@ def audit_checkpoint(source, *, sample=128, sample_seed=20261101, repeats=10, ba
         population, starts, assessment, seeds=seeds, encoding_seed=config.encoding_seed,
         training_goals=goals, assessment_goals=assessment_goals, learning=config.learning,
         learning_config=config.learning_config, backend=backend, workers=workers,
-        return_weights=True, boundary_mode=config.boundary_mode)
+        return_weights=True, boundary_mode=config.boundary_mode, environment=config.environment)
     frozen = []
     for lane, species in enumerate(population):
         if config.model == "senses":
@@ -97,7 +99,7 @@ def audit_checkpoint(source, *, sample=128, sample_seed=20261101, repeats=10, ba
                     data['embedding'][f'goal_{goal:+d}'] = {q: 0.0 for q in species.inherited.pair_ids}
             members.append(replace(species, inherited=InheritedMappings.from_data(data)))
         settings = dict(seeds=seeds, encoding_seed=config.encoding_seed, backend=backend,
-                        workers=workers, boundary_mode=config.boundary_mode)
+                        workers=workers, boundary_mode=config.boundary_mode, environment=config.environment)
         evaluator = evaluate_frozen
         if config.model == "senses":
             from .experimental.sensory_accelerated import evaluate_frozen as evaluator
@@ -116,8 +118,8 @@ def audit_checkpoint(source, *, sample=128, sample_seed=20261101, repeats=10, ba
                     uniform_nonzero_8=(-5, -3, -2, -1, 1, 2, 3, 5),
                     always_plus_5=(5,), always_minus_5=(-5,))
     baselines = {name: dict(
-        fixed_assessment_mean=movement_baseline(list(zip(assessment, assessment_goals)), moves, config.boundary_mode),
-        exhaustive_heldout_mean=movement_baseline(exhaustive, moves, config.boundary_mode))
+        fixed_assessment_mean=movement_baseline(list(zip(assessment, assessment_goals)), moves, config.boundary_mode, **spec.world_kwargs),
+        exhaustive_heldout_mean=movement_baseline(exhaustive, moves, config.boundary_mode, **spec.world_kwargs))
         for name, moves in policies.items()}
     return dict(generation=generation + 1, checkpoint_next_generation=generation,
                 checkpoint_sha256=digest.hexdigest(), config=asdict(config), partitions=state['partitions'],
@@ -134,7 +136,7 @@ def main():
     parser.add_argument('--sample', type=int, default=128)
     parser.add_argument('--sample-seed', type=int, default=20261101)
     parser.add_argument('--repeats', type=int, default=10)
-    parser.add_argument('--backend', choices=('native', 'cuda'), default='native')
+    parser.add_argument('--backend', choices=('native',), default='native')
     parser.add_argument('--workers', type=int, default=4)
     parser.add_argument('--output', type=Path, default=Path('runs/bias-audit.json'))
     args = parser.parse_args()

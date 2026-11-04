@@ -19,13 +19,21 @@ required to start the workspace. `./project demo` and `./demo` open it too.
 
 The **Sessions** tab lists all model families, plots saved performance, displays
 per-seed comparisons, and shows logs, configuration and downloadable artifacts.
-The **New session** tab selects the model and procedure, names the session and
-sets its learning/evaluation budgets. Both models expose evolutionary generation
-and population sizes, learning, inheritance, speciation, memory ceiling and
-champion collection size. Fixed senses additionally exposes receptor capacity
-and supports the same Python, native CPU and CUDA evaluators as the categorical model. Selecting both models defaults to a matched evolutionary
-comparison with generations. A separate fixed-structure lifetime benchmark remains
-available. The standalone adaptation mode can import a baseline repertoire.
+The **New session** tab offers **Evolutionary training** or **Compare starting populations**. Both run full evolution. Choose the
+model, **Environment**, and **Load saved candidates** (or **Start fresh**), then
+set population, generations and episode budgets. Fixed senses also exposes receptor
+capacity. Both models support native CPU and Python evaluation. Standalone lifetime/range
+transfer, learning-treatment comparisons and other research procedures are not session
+types in this form; existing saved reports and CLI research tools remain available.
+
+The main workflow is:
+
+1. Pick a model and environment and run evolutionary training.
+2. On that session's overview, enter a candidate-set name and count, then click
+   **Save candidates**.
+3. Open **New session**, select the same model, choose the set under **Load saved
+   candidates**, and pick the next environment.
+4. Set the new generation target and start normal evolutionary training again.
 
 Clicking **Start session** starts a separate background process. Closing the
 browser or stopping the workspace server does not stop that training process.
@@ -40,8 +48,16 @@ The **Animal playground** tab selects the categorical or fixed-senses model,
 source run, and an exact saved snapshot. It retains task start/goal/seed controls,
 random movement, replay, stepping, restart, speed and scrubbing. Sensory models
 also show their observed/predicted receptors and support the expanded world.
-Every attempt reconstructs a frozen copy: playing never edits saved mappings.
-Use **Download model** to export the selected snapshot. Original views remain
+Learning is off by default. Enable **Lifetime learning across attempts** to keep
+prediction and structural updates in a separate playground copy for either model.
+Turning learning off freezes that current copy; **Reset learned state** restores
+the selected saved snapshot. Random-policy attempts do not train the animal.
+The status shows cumulative prediction updates and structural corrections.
+Changes stay in visualizer memory across attempts, including world changes;
+selecting a different snapshot, reloading the page, or restarting the server
+starts a fresh playground lifetime. Saved mappings and training runs are never
+modified. The attempt seed controls sampling while weights persist.
+Use **Download model** to export the original selected snapshot. Original views remain
 at `/playground`, `/runs`, and `/comparisons`.
 
 New browser-launched sessions record identity, configuration, PID, process
@@ -132,7 +148,7 @@ deterministic initial values. Each lifetime learns from a mutable copy. By defau
 offspring inherit original genotype weights; `--inherit-lifetime` enables copying
 end-of-training sensory parameters before reproduction. Assessment stays frozen
 and never supplies inherited updates. Receptor capacity remains fixed across
-generations and resume. Both models support Python, native CPU and CUDA evaluation,
+generations and resume. Both models support Python and native CPU evaluation,
 and clamp or terminate boundary modes. Checkpoints, generation records and champion collections use the shared
 training artifact layout with tagged sensory mappings.
 
@@ -322,15 +338,14 @@ is a separate deliberate operation, not part of routine cleanup.
 See the [documentation map](docs/README.md) for the roadmap, experiment history,
 audits and distinction between implemented behavior and proposed research.
 
-Both evolutionary models now offer the same evaluator choices (`python`,
-`native`, `cuda`), checkpoint/resume flow, mutation and selection options,
+Both evolutionary models now offer the same evaluator choices (`python`, `native`), checkpoint/resume flow, mutation and selection options,
 champion collections, frozen benchmarks and playback exports. For sensory
 learning/inheritance/speciation comparisons, add `--model senses` to
 `./project compare`. `./project audit latest-sensory-training` runs frozen
 sensory goal-input controls. To measure both implementations on this machine:
 
 ```sh
-./project speed --models categorical senses --backends native cuda --populations 32 --repeats 2
+./project speed --models categorical senses --backends python native --populations 32 --repeats 2
 ```
 
 Accelerated sensory evaluation supports up to 16384 receptors and 4096 repertoire
@@ -347,3 +362,167 @@ structural correction and the next prediction. The sensory model preserves the
 two-stage learning schedule but changes the prediction objective, output-policy
 coupling and shared structural credit assignment. Tooling parity does not imply
 identical learning dynamics. Reproduce with `./project trace-learning`.
+
+## Shifted environment and reusable populations
+
+Before launching evolutionary training, choose **Environment**: original
+`[-20,20]` or shifted `[30,70]`. Both models support both worlds with Python,
+native CPU evaluation. The shifted world has identical movement buttons,
+41 positions and wall rules, but sensory packets contain the actual shifted
+coordinates. No centering or distance is supplied to the animal. Fixed-goal mode
+uses the world's center: 0 in the original world, 50 in the shifted world.
+The environment is saved in checkpoints and cannot change on resume; start a new
+session to change environments.
+
+```sh
+./project train --model senses --environment shifted --backend native \
+  --population 32 --generations 50 --population-save-count 10
+```
+
+New runs maintain `best-population.json.gz`, retaining distinct inherited genomes
+ranked by their highest observed training fitness across completed evaluations.
+Ties prefer earlier generation and animal index; held-out scores never select the
+members. The **Top candidates to retain** field controls the collection size. Training
+tasks can differ by generation, so these saved selection scores are not a matched
+comparison by themselves.
+
+On a training session's overview, **Save candidates** creates a separate,
+reusable collection. It remains unchanged when the source session continues.
+Older sessions can export only their saved generation champions; the collection
+records this limitation instead of claiming to contain all top individuals.
+
+Under **Load saved candidates**, select a saved collection for a new session. The
+best ranked members fill the first slots; if more animals are requested, remaining
+slots are deterministic mutated descendants. If fewer are requested, only the
+highest ranked members are loaded. Collections contain inherited genotype weights,
+not end-of-lifetime learned weights. This preserves ordinary evolutionary
+inheritance semantics and makes the new lifetime-learning budget explicit.
+Model type, receptor capacity, action encoding and goal-input mode must match.
+Fixed-senses candidates retain all mappings when moving to the other environment.
+Categorical candidates retain the repertoire and mapping entries whose opaque token
+identities occur in both environments, including the movement columns. Unseen
+observation/prediction tokens receive deterministic initial values using the usual
+mapping initializer; no numeric relationship is supplied and no lifetime learning
+rule changes. Thus categorical transfer does not preserve predictions for tokens
+absent from the new vocabulary. Both models can start a new evolutionary session
+in either environment. `candidate-import.json` records this preparation explicitly. Imported genomes are copied into
+`initial-population.json.gz` in the new run for provenance; resume uses its saved
+checkpoint and does not reread the source collection.
+
+```sh
+./project populations save runs/MY-RUN --count 10 \
+  --output runs/populations/my-population.json.gz --name "My population"
+./project train --model senses --environment shifted --backend native \
+  --initial-population runs/populations/my-population.json.gz \
+  --population 32 --generations 50
+```
+
+For separate research comparisons, the CLI can benchmark two or more collections
+in a common environment; this is not a session type in the training setup. Every animal receives the same sampled training tasks and
+learning budget, followed by the same frozen held-out tasks. Structure stays fixed;
+there is no evolution in this comparison. The chart and table report population
+means, with individual results in `report.json`. A newly named output session
+preserves each comparison. Different source models/capacities are whole-model
+comparisons, not isolated tests of the sensory interface. Old source selection
+scores do not enter this benchmark's scoring.
+
+```sh
+./project populations benchmark \
+  --populations runs/populations/first.json.gz runs/populations/second.json.gz \
+  --environment shifted --episodes 100 --assessment-episodes 200 \
+  --backend native --output runs/population-comparison
+```
+
+The benchmark uses clamp boundaries and default local learning rates for every
+collection, reports exact random movement performance on the common assessment
+tasks, and freezes both learning rules during assessment. Collections must have
+matching goal-input modes; categorical vocabulary restrictions still apply.
+
+
+CUDA support has been removed. New sessions offer native CPU and Python only.
+Saved CUDA configurations remain readable and resume with native CPU after an
+explicit notice; resumed runs record the migration while retaining weights and
+historical results. GPU dependencies are no longer part of the project setup.
+Historical audit/benchmark records remain unchanged descriptions of their original
+implementations and measurements.
+
+
+## Evolutionary benchmark of starting populations
+
+In **New session**, select your model and **Compare starting populations**.
+Choose **Arm A — starting candidates** and **Arm B — starting candidates**
+independently: each can be **Start fresh** or any saved candidate set for that model.
+This supports fresh vs saved, two different saved sets, or two fresh populations.
+Choose one common environment, population size, generations and episode budgets,
+then start the benchmark.
+
+Both arms run normal evolutionary training, including reproduction, mutation,
+elites, and the same selected lifetime-learning/inheritance/speciation options.
+Training and assessment task hashes are verified to match at every completed
+common generation. Fresh arms use separate initialization seeds while retaining a
+common seed for tasks and evolutionary evaluation. Imported candidates use the
+same loading and environment preparation as ordinary evolutionary sessions;
+extra population slots follow the existing deterministic-mutant rule.
+
+The benchmark displays both arms' population training and held-out curves by
+**generation**, with links to their full training sessions and saved candidates.
+After evolution, each arm's highest-training saved champion is tested frozen on
+fresh common held-out tasks. This final champion comparison is distinct from the
+population means on the training curves. A single paired seed describes that run;
+it is not an estimate of reliable average advantage. The CLI supports multiple
+paired seeds if independent repetitions are wanted.
+
+The manifest records source names, original file hashes, frozen input copies and
+initialization seeds. Original candidate files can be removed after launch;
+resume uses the benchmark's immutable copies and rejects altered copies. Both
+candidate sets must match the selected model and receptor capacity and share an
+action encoding and goal-input mode; the UI carries those settings into fresh
+arms as well. The common learning/evolution settings apply equally to both arms.
+
+```sh
+# Saved vs fresh: omit --population-b for a fresh B arm.
+./project compare --treatment starting-population --model senses \
+  --population-a runs/populations/candidates.json.gz \
+  --environment shifted --population 32 --generations 50 \
+  --episodes 100 --assessment-episodes 200 --benchmark-episodes 2000 \
+  --seeds 48 --backend native --output runs/comparisons/saved-vs-fresh
+
+# Saved vs saved: provide both --population-a and --population-b.
+# Fresh vs fresh: omit both arguments.
+./project compare --resume runs/comparisons/saved-vs-fresh
+```
+
+The workspace's **Stop session** stops the paired benchmark and its training
+processes, preserving completed-generation checkpoints. Resume continues the
+remaining training and then runs the common final tests.
+
+
+## Frozen assessments
+
+Open the **Assessments** tab to evaluate one or more saved candidate populations.
+Select populations, an environment, episodes per candidate, task seed and wall
+rules, then click **Run frozen assessment**. The tab shows population mean/best/worst
+success, expandable individual scores, exact random-movement performance on the
+same tasks, and a downloadable full report. Saved assessments remain in the tab's
+history and the session library; closing the browser does not stop a running job.
+
+Assessment uses each candidate's inherited weights **exactly as stored** in the
+saved collection. It calls only frozen evaluators: no warmup, lifetime updates,
+mutation, reproduction, vocabulary initialization, or candidate adaptation occurs.
+Every candidate receives the same ordered tasks. Scores are reproducible for the
+same saved inputs, configuration and seed. Tasks are sampled across the selected
+world and may overlap earlier training tasks; this is not an automatic claim of
+held-out generalization.
+
+Fixed-senses candidates can be frozen-tested in either environment. Categorical
+candidates require their existing environment vocabulary; select their saved
+environment instead of creating new entries during assessment. Populations assessed
+together must use the same goal-input mode. The results retain exact input copies,
+source hashes, tasks, candidate identities and zero empirical/structural-update
+counts. Stop an assessment from its results panel to retain partial results.
+
+```sh
+./project assess --populations runs/populations/first.json.gz runs/populations/second.json.gz \
+  --environment shifted --episodes 200 --seed 48 --workers 4 \
+  --output runs/frozen-assessment
+```

@@ -82,10 +82,10 @@ held-out positions, so this is not a guarantee that all held-out states are unse
 
 ## Backends and reproducibility
 
-The original Python evaluator produces full event traces. Optional compiled CPU
-and CUDA evaluators execute independent lifetimes while preserving episode order,
-local-update order, separate RNG streams, and immutable inherited state. They use
-Python-derived MT19937 states and double precision. They perform no lambda reduction.
+The original Python evaluator produces full event traces. The optional compiled CPU
+evaluator executes independent lifetimes while preserving episode order,
+local-update order, separate RNG streams, and immutable inherited state. It uses
+Python-derived MT19937 states and double precision. It performs no lambda reduction.
 Every accelerated generation's champion is replayed through Python and checked
 before its detailed trace is saved. Tests compare sampled behavior, update counts,
 and learned weights; floating-point loss/logit roundoff is tolerated.

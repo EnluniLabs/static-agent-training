@@ -464,3 +464,23 @@ The central design requirement is **a stable, type-agnostic signal boundary
 that permits learned generalization without pre-imposing the relationships
 the coherent repertoire is supposed to explain**. The simplest bitwise
 shared-weight map is a candidate starting point, not a settled architecture.
+
+## Optional GitHub publishing when a run finishes
+
+Status: **planned for later**, requested 2026-11-02. This note does not enable
+publishing or change any running benchmark.
+
+Add an optional publish-on-completion setting for training and benchmark runs.
+Also allow attaching a persistent watcher to an already-running run without
+restarting it or changing its configuration.
+
+- Publish configuration, seeds, the code commit used by the run, result summaries,
+  charts, and selected champions. Preserve the original code version in the
+  record even if the workspace changes before completion.
+- Keep summaries on a dedicated results branch or in a GitHub release; avoid
+  automatic merges into the code branch. Store large checkpoints as release
+  assets, with raw logs and every-generation artifacts kept local by default.
+- Run publishing separately from training. Retry failed uploads without affecting
+  the completed run or deleting local results, and persist publication status so
+  retries and watcher restarts do not create duplicate records.
+- Expose publication status and the resulting GitHub link in the visualizer.

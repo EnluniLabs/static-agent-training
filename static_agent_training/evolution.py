@@ -5,7 +5,9 @@ import random
 import math
 import hashlib
 import json
+import warnings
 
+from .environments import environment_spec
 from .environment import NumberLine, POSITIONS, sample_starts
 from .evaluation import evaluate
 from .baseline import random_task_mean
@@ -48,14 +50,21 @@ class TrainingConfig:
     learning_config: LearningConfig = field(default_factory=LearningConfig)
     model: str = 'categorical'
     receptors: int = 256
+    environment: str = "original"
+    initial_population: str | None = None
+    population_save_count: int = 10
+    initialization_seed: int | None = None
 
     def __post_init__(self):
+        environment_spec(self.environment)
+        if self.initialization_seed is not None and (type(self.initialization_seed) is not int or self.initialization_seed < 0):
+            raise ValueError('initialization seed must be a nonnegative integer')
         if self.model not in ('categorical', 'senses'):
             raise ValueError('model must be categorical or senses')
         if type(self.receptors) is not int or self.receptors < 16 or self.receptors % 16:
             raise ValueError('receptors must be a positive multiple of 16')
         for name in ('population', 'generations', 'episodes', 'assessment_episodes',
-                     'tournament_size', 'initial_pairs', 'workers', 'batch_size'):
+                     'tournament_size', 'initial_pairs', 'workers', 'batch_size', 'population_save_count'):
             value = getattr(self, name)
             if type(value) is not int or value < 1:
                 raise ValueError(f'{name} must be a positive integer')
@@ -77,8 +86,8 @@ class TrainingConfig:
             raise ValueError('distance mean must be finite and between 1 and 40')
         if not math.isfinite(self.distance_stddev) or self.distance_stddev <= 0:
             raise ValueError('distance standard deviation must be finite and positive')
-        if self.backend not in ('python', 'native', 'cuda'):
-            raise ValueError('backend must be python, native, or cuda')
+        if self.backend not in ('python', 'native'):
+            raise ValueError('backend must be python or native')
         if type(self.elites) is not int or not 0 <= self.elites < self.population:
             raise ValueError('elites must be between zero and population minus one')
         if type(self.chain_budget) is not int or self.chain_budget < 0:
@@ -87,6 +96,10 @@ class TrainingConfig:
     @classmethod
     def from_data(cls, data):
         data = dict(data)
+        if data.get('backend') == 'cuda':
+            warnings.warn('CUDA support was removed; this saved configuration will use native CPU evaluation.',
+                          RuntimeWarning, stacklevel=2)
+            data['backend'] = 'native'
         data.setdefault("varying_goals", False)
         data.setdefault("distance_distribution", "uniform")
         data.setdefault("boundary_mode", "terminate")
@@ -97,32 +110,37 @@ class TrainingConfig:
         return cls(**data)
 
 
-def partitions(seed, *, include_zero=False):
-    positions = list(POSITIONS) if include_zero else [x for x in POSITIONS if x]
+def partitions(seed, *, include_zero=False, environment="original"):
+    spec = environment_spec(environment)
+    positions = list(spec.positions) if include_zero else [x for x in spec.positions if x != spec.center]
     random.Random(derive(seed, 'partitions')).shuffle(positions)
     count=len(positions)-10
     return dict(training=sorted(positions[:count]), assessment=sorted(positions[count:]))
 
 
 def initialize_population(config, progress=None):
+    if config.initial_population:
+        from .populations import initialize_saved
+        return initialize_saved(config)
+    initialization_seed = config.seed if config.initialization_seed is None else config.initialization_seed
     senses = None
     if config.model == 'senses':
         from .experimental.senses import FixedSenses
         senses = FixedSenses(receptors=config.receptors)
         observations, outputs = (), ()
     else:
-        vocabulary = NumberLine(encoding_seed=config.encoding_seed, goal_conditioned=config.varying_goals)
+        vocabulary = NumberLine(encoding_seed=config.encoding_seed, goal_conditioned=config.varying_goals, **environment_spec(config.environment).world_kwargs)
         observations = [s.token for s in vocabulary.observation_tokens]
         outputs = [o.token for o in vocabulary.output_tokens]
     population = []
     for index in range(config.population):
-        generated = initialize(Config(seed=derive(config.seed, 'initial', index), count=config.initial_pairs,
+        generated = initialize(Config(seed=derive(initialization_seed, 'initial', index), count=config.initial_pairs,
                                       max_depth=config.mutation.max_depth, max_nodes=config.mutation.max_nodes,
                                       combinator_probability=config.mutation.combinator_probability))
         pairs = [(p['left']['ast'], p['right']['ast']) for p in generated['initial_pairs']]
         population.append(develop(pairs, observations, outputs, budgets=config.chain_budget,
-                                  development_seed=derive(config.seed, 'initial-development', index),
-                                  mapping_seed=derive(config.seed, 'initial-mapping', index), config=config.development,
+                                  development_seed=derive(initialization_seed, 'initial-development', index),
+                                  mapping_seed=derive(initialization_seed, 'initial-mapping', index), config=config.development,
                                   senses=senses))
         if progress:
             progress(dict(phase='developing', completed=index + 1, total=config.population))
@@ -137,23 +155,24 @@ def structural_population_id(population):
 
 
 def generation_tasks(config, generation, split):
+    spec = environment_spec(config.environment)
     if config.distance_distribution == 'normal':
         tasks = []
         for phase, count, seed in (
                 ('training', config.episodes, derive(config.seed, 'training-tasks', generation)),
                 ('assessment', config.assessment_episodes, derive(config.seed, 'assessment-tasks'))):
             tasks.append(sample_tasks(seed, count, starts=split[phase],
-                                     goals=split[phase] if config.varying_goals else (0,),
-                                     mean=config.distance_mean, stddev=config.distance_stddev))
+                                     goals=split[phase] if config.varying_goals else (spec.center,),
+                                     mean=config.distance_mean, stddev=config.distance_stddev, **spec.world_kwargs))
         training, assessment = tasks
         return ([s for s,g in training], [s for s,g in assessment],
                 [g for s,g in training] if config.varying_goals else None,
                 [g for s,g in assessment] if config.varying_goals else None)
     def starts_for(seed,count,allowed):
         if not config.varying_goals:
-            allowed=tuple(x for x in allowed if x!=0)
+            allowed=tuple(x for x in allowed if x!=spec.center)
         if 0 not in allowed:
-            return sample_starts(seed,count,allowed=allowed)
+            return sample_starts(seed,count,allowed=allowed, **spec.world_kwargs)
         rng=random.Random(seed)
         return tuple(rng.choice(allowed) for _ in range(count))
     training_starts = starts_for(derive(config.seed, 'training-starts', generation), config.episodes,
@@ -177,8 +196,8 @@ def evaluate_generation(population, config, generation, split, progress=None, *,
         from .experimental.sensory_evolution import evaluate_generation as evaluate_sensory_generation
         return evaluate_sensory_generation(population, config, generation, split, progress, return_lifetime=return_lifetime)
     training_starts, assessment_starts, training_goals, assessment_goals = generation_tasks(config, generation, split)
-    random_training = random_task_mean(training_starts, training_goals, boundary_mode=config.boundary_mode)
-    random_assessment = random_task_mean(assessment_starts, assessment_goals, boundary_mode=config.boundary_mode)
+    random_training = random_task_mean(training_starts, training_goals, boundary_mode=config.boundary_mode, **environment_spec(config.environment).world_kwargs)
+    random_assessment = random_task_mean(assessment_starts, assessment_goals, boundary_mode=config.boundary_mode, **environment_spec(config.environment).world_kwargs)
     lifetime_population=[] if config.inherit_lifetime else None
     accelerated_results = None
     if config.backend != 'python':
@@ -191,7 +210,7 @@ def evaluate_generation(population, config, generation, split, progress=None, *,
                 seeds=[derive(config.seed, 'evaluation', generation, i) for i in range(first, first + len(batch))],
                 encoding_seed=config.encoding_seed, learning=config.learning,
                 learning_config=config.learning_config, training_goals=training_goals,
-                assessment_goals=assessment_goals, backend=config.backend, workers=config.workers, boundary_mode=config.boundary_mode,return_weights=config.inherit_lifetime)
+                assessment_goals=assessment_goals, backend=config.backend, workers=config.workers, boundary_mode=config.boundary_mode,environment=config.environment,return_weights=config.inherit_lifetime)
             if config.inherit_lifetime:
                 batch_results,weights=evaluated
                 for lane,individual in enumerate(batch):
@@ -215,7 +234,7 @@ def evaluate_generation(population, config, generation, split, progress=None, *,
                                       seed=derive(config.seed, 'evaluation', generation, index),
                                       encoding_seed=config.encoding_seed, learning=config.learning,
                                       learning_config=config.learning_config,
-                                      training_goals=training_goals, assessment_goals=assessment_goals, boundary_mode=config.boundary_mode)
+                                      training_goals=training_goals, assessment_goals=assessment_goals, boundary_mode=config.boundary_mode, environment=config.environment)
         else:
             result, detail = accelerated_results[index], None
         if config.inherit_lifetime and accelerated_results is None:
@@ -235,7 +254,7 @@ def evaluate_generation(population, config, generation, split, progress=None, *,
             seed=derive(config.seed, 'evaluation', generation, champion),
             encoding_seed=config.encoding_seed, learning=config.learning,
             learning_config=config.learning_config, training_goals=training_goals,
-            assessment_goals=assessment_goals, boundary_mode=config.boundary_mode)
+            assessment_goals=assessment_goals, boundary_mode=config.boundary_mode, environment=config.environment)
         assert_equivalent({k: v for k, v in results[champion].items() if k != 'index'}, reference)
         # Preserve a full, independently checked champion trace for export and replay.
         reference['index'] = champion

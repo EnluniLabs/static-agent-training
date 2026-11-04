@@ -45,17 +45,22 @@ class NumberLine:
     A fresh agent computation begins whenever a transition has an observation.
     """
 
-    def __init__(self, *, encoding_seed=0, episode_seed=0, action_limit=12, internal_limit=16, goal_conditioned=False, boundary_mode="clamp"):
+    def __init__(self, *, encoding_seed=0, episode_seed=0, action_limit=12, internal_limit=16, goal_conditioned=False, boundary_mode="clamp", lower=-20, upper=20):
         if action_limit < 1 or internal_limit < 1:
             raise ValueError("limits must be positive")
         if boundary_mode not in ("clamp", "terminate"):
             raise ValueError("boundary mode must be clamp or terminate")
+        if type(lower) is not int or type(upper) is not int or lower >= upper:
+            raise ValueError("bounds must be ordered integers")
+        self.lower, self.upper = lower, upper
+        self.positions = tuple(range(lower, upper + 1))
+        self.default_goal = (lower + upper) // 2
         self.boundary_mode = boundary_mode
         self.goal_conditioned = goal_conditioned
-        self._goal = 0
-        permutation = list(POSITIONS)
+        self._goal = self.default_goal
+        permutation = list(self.positions)
         random.Random(encoding_seed).shuffle(permutation)
-        self._signals = ({x: f"obs_{x:+d}" for x in POSITIONS} if goal_conditioned else
+        self._signals = ({x: f"obs_{x:+d}" for x in self.positions} if goal_conditioned else
                          {x: f"obs_{i:02d}" for i, x in enumerate(permutation)})
         shuffled_moves = list(MOVES)
         random.Random(f"moves:{encoding_seed}").shuffle(shuffled_moves)
@@ -63,21 +68,22 @@ class NumberLine:
         self._expects = {"expect_" + token[len("obs_"):]: x for x, token in self._signals.items()}
         self.observation_tokens = tuple(Observation(token) for token in self._signals.values())
         if goal_conditioned:
-            self.observation_tokens += tuple(Observation(f"goal_{x:+d}") for x in POSITIONS)
+            self.observation_tokens += tuple(Observation(f"goal_{x:+d}") for x in self.positions)
         self.output_tokens = tuple(Output(t) for t in (*self._moves, *self._expects))
         self._rng = random.Random(episode_seed)
         self.action_limit = action_limit
         self.internal_limit = internal_limit
         self._done = True
 
-    def reset(self, *, start=None, goal=0):
+    def reset(self, *, start=None, goal=None):
         """Explicit numeric starts are for the experiment runner, never the agent."""
-        if type(goal) is not int or goal not in POSITIONS or (goal != 0 and not self.goal_conditioned):
-            raise ValueError("goal must be in [-20, 20]; nonzero goals require goal-conditioned observations")
+        goal = self.default_goal if goal is None else goal
+        if type(goal) is not int or goal not in self.positions or (goal != self.default_goal and not self.goal_conditioned):
+            raise ValueError("goal must be inside the world; custom goals require goal-conditioned observations")
         self._goal = goal
-        if start is not None and (type(start) is not int or start not in POSITIONS or start == goal):
-            raise ValueError("start must be in [-20, 20] and differ from goal")
-        self._position = self._rng.choice([x for x in POSITIONS if x != goal]) if start is None else start
+        if start is not None and (type(start) is not int or start not in self.positions or start == goal):
+            raise ValueError("start must be inside the world and differ from goal")
+        self._position = self._rng.choice([x for x in self.positions if x != goal]) if start is None else start
         self._actions = self._internal = self._next_expectation = 0
         self._pending = []
         self._done = False
@@ -118,8 +124,8 @@ class NumberLine:
         self._position += self._moves[token]
         self._internal = 0
         if self.boundary_mode == "clamp":
-            self._position = max(-20, min(20, self._position))
-        if self._position not in POSITIONS:
+            self._position = max(self.lower, min(self.upper, self._position))
+        if self._position not in self.positions:
             # No input symbol exists outside the world. Commitments expire
             # without an observation against which to score them.
             return self._end("out_of_bounds")
@@ -144,9 +150,9 @@ class NumberLine:
                 "observation_encoding": dict(self._signals)}
 
 
-def sample_starts(seed, count=20, *, allowed=tuple(x for x in POSITIONS if x)):
+def sample_starts(seed, count=20, *, allowed=tuple(x for x in POSITIONS if x), lower=-20, upper=20):
     """Common ordered starts for all agents in a generation; with replacement."""
-    if count < 1 or not allowed or any(x not in POSITIONS or x == 0 for x in allowed):
+    if count < 1 or not allowed or any(type(x) is not int or not lower <= x <= upper for x in allowed):
         raise ValueError("require positive count and valid nonzero allowed starts")
     rng = random.Random(seed)
     return tuple(rng.choice(allowed) for _ in range(count))

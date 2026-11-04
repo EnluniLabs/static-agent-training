@@ -2,6 +2,7 @@
 from collections import OrderedDict
 import gzip
 import json
+from .environments import environment_spec
 from pathlib import Path
 import threading
 
@@ -69,20 +70,22 @@ def load_saved_candidate(directory, generation=None):
         bundle = dict(schema_version='crt-sensory-candidate-v1', model='senses', generation=generation + 1,
                       training_success=result['training']['fitness'], assessment_success=result['assessment']['fitness'],
                       individual=trace['individual'], learned_model=trace['learned_model'], assessment_seed=result['seed'],
-                      encoding_seed=config['encoding_seed'], varying_goals=config.get('varying_goals', True),
+                      environment=config.get('environment', 'original'), encoding_seed=config['encoding_seed'], varying_goals=config.get('varying_goals', True),
                       boundary_mode=config.get('boundary_mode', 'clamp'), episodes=episodes)
         bundle['random_assessment_success'] = random_task_mean(
-            [e['start'] for e in episodes], [e.get('goal', 0) for e in episodes], boundary_mode=bundle['boundary_mode'])
+            [e['start'] for e in episodes], [e.get('goal', 0) for e in episodes], boundary_mode=bundle['boundary_mode'], **environment_spec(bundle.get('environment','original')).world_kwargs)
         attach_benchmark(bundle, benchmark_path)
         return bundle
     bundle = dict(schema_version='crt-demo-v1', generation=generation+1,
                   training_success=result['training']['fitness'],
                   assessment_success=result['assessment']['fitness'],
                   individual=trace['individual'], learned_embedding=trace['learned_embedding'],
-                  learned_output=trace['learned_output'], encoding_seed=config['encoding_seed'],
+                  learned_output=trace['learned_output'], environment=config.get('environment', 'original'), encoding_seed=config['encoding_seed'],
+                  learning_config=config.get('learning_config', {}),
+                  revised={e['pair']:i for i,e in enumerate(trace.get('training_events', [])) if e['kind']=='EMPIRICAL_UPDATE'},
                   varying_goals=config.get('varying_goals', False), boundary_mode=config.get('boundary_mode','terminate'), episodes=episodes)
     bundle['random_assessment_success'] = random_task_mean(
-        [e['start'] for e in episodes], [e.get('goal', 0) for e in episodes], boundary_mode=bundle['boundary_mode'])
+        [e['start'] for e in episodes], [e.get('goal', 0) for e in episodes], boundary_mode=bundle['boundary_mode'], **environment_spec(bundle.get('environment','original')).world_kwargs)
     attach_benchmark(bundle, benchmark_path)
     return bundle
 

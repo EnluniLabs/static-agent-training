@@ -5,6 +5,7 @@ import hashlib
 import json
 import random
 
+from ..environments import environment_spec
 from ..baseline import random_task_mean
 from ..seeds import derive
 from ..speciation import describe
@@ -18,9 +19,9 @@ def fingerprint(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
-def block(model, tasks, *, learn, encoding_seed, boundary_mode="clamp", goal_conditioned=True):
+def block(model, tasks, *, learn, encoding_seed, boundary_mode="clamp", goal_conditioned=True, environment="original"):
     world = SensoryAdapter(StimulusNumberLine(encoding_seed=encoding_seed, boundary_mode=boundary_mode,
-                                                   goal_conditioned=goal_conditioned), model.senses)
+                                                   goal_conditioned=goal_conditioned, **environment_spec(environment).world_kwargs), model.senses)
     episodes, counts = [], Counter()
     for start, goal in tasks:
         offset = len(model.events)
@@ -54,14 +55,14 @@ def evaluate(individual, training_tasks, assessment_tasks, *, seed, config):
     model.embedding_rng = random.Random(derive(seed, 'training', 'embedding'))
     model.output_rng = random.Random(derive(seed, 'training', 'output'))
     training = block(model, training_tasks, learn=config.learning, encoding_seed=config.encoding_seed,
-                     boundary_mode=config.boundary_mode, goal_conditioned=config.varying_goals)
+                     boundary_mode=config.boundary_mode, goal_conditioned=config.varying_goals, environment=config.environment)
     learned = model.to_data()
     assessor = BitModel(individual.repertoire, senses=inherited.senses, parameters=model.parameters(),
                         seed=seed, learning_config=config.learning_config)
     assessor.embedding_rng = random.Random(derive(seed, 'assessment', 'embedding'))
     assessor.output_rng = random.Random(derive(seed, 'assessment', 'output'))
     assessment = block(assessor, assessment_tasks, learn=False, encoding_seed=config.encoding_seed,
-                     boundary_mode=config.boundary_mode, goal_conditioned=config.varying_goals)
+                     boundary_mode=config.boundary_mode, goal_conditioned=config.varying_goals, environment=config.environment)
     result = dict(genotype_id=individual.genotype_id, seed=seed, training=training, assessment=assessment,
                   repertoire_size=len(individual.repertoire.pairs), successor_count=len(individual.repertoire.successors),
                   model='senses')
@@ -74,8 +75,8 @@ def evaluate(individual, training_tasks, assessment_tasks, *, seed, config):
 def evaluate_generation(population, config, generation, split, progress=None, *, return_lifetime=False):
     from ..evolution import generation_tasks, structural_population_id
     train_starts, test_starts, train_goals, test_goals = generation_tasks(config, generation, split)
-    training_tasks = list(zip(train_starts, train_goals or [0] * len(train_starts)))
-    assessment_tasks = list(zip(test_starts, test_goals or [0] * len(test_starts)))
+    training_tasks = list(zip(train_starts, train_goals or [environment_spec(config.environment).center] * len(train_starts)))
+    assessment_tasks = list(zip(test_starts, test_goals or [environment_spec(config.environment).center] * len(test_starts)))
     results, champion, champion_detail = [], 0, None
     lifetime_population = [] if config.inherit_lifetime else None
     accelerated = None
@@ -89,7 +90,7 @@ def evaluate_generation(population, config, generation, split, progress=None, *,
                 seeds=[derive(config.seed, 'evaluation', generation, i) for i in range(first, first+len(batch))],
                 encoding_seed=config.encoding_seed, learning=config.learning, learning_config=config.learning_config,
                 backend=config.backend, workers=config.workers, boundary_mode=config.boundary_mode,
-                goal_conditioned=config.varying_goals, return_weights=config.inherit_lifetime)
+                goal_conditioned=config.varying_goals, environment=config.environment, return_weights=config.inherit_lifetime)
             if config.inherit_lifetime:
                 rows, weights = evaluated
                 lifetime_population.extend(replace(p, inherited=learned_mappings(p, weights, i)) for i,p in enumerate(batch))
@@ -128,8 +129,8 @@ def evaluate_generation(population, config, generation, split, progress=None, *,
     summary = dict(generation=generation, model='senses', mean=sum(scores) / len(scores), best=max(scores),
                    assessment_mean=sum(r['assessment']['fitness'] for r in results) / len(results),
                    champion_assessment=results[champion]['assessment']['fitness'],
-                   random_training=random_task_mean(train_starts, train_goals, boundary_mode=config.boundary_mode),
-                   random_assessment=random_task_mean(test_starts, test_goals, boundary_mode=config.boundary_mode),
+                   random_training=random_task_mean(train_starts, train_goals, boundary_mode=config.boundary_mode, **environment_spec(config.environment).world_kwargs),
+                   random_assessment=random_task_mean(test_starts, test_goals, boundary_mode=config.boundary_mode, **environment_spec(config.environment).world_kwargs),
                    unique_genotypes=len({r['genotype_id'] for r in results}),
                    unique_structures=len({describe(p) for p in population}),
                    mean_repertoire=sum(r['repertoire_size'] for r in results) / len(results),
@@ -158,10 +159,11 @@ def benchmark(directory, bundle, tasks, *, seed):
     model = BitModel.from_data(bundle['learned_model'])
     model.embedding_rng.seed(derive(seed, 'benchmark-animal-embedding'))
     model.output_rng.seed(derive(seed, 'benchmark-animal-output'))
+    spec = environment_spec(bundle.get('environment', 'original'))
     boundary = bundle.get('boundary_mode', 'clamp')
     world = SensoryAdapter(StimulusNumberLine(encoding_seed=bundle['encoding_seed'], boundary_mode=boundary,
-                              goal_conditioned=bundle.get('varying_goals', True)), model.senses)
-    control = NumberLine(encoding_seed=bundle['encoding_seed'], goal_conditioned=True, boundary_mode=boundary)
+                              goal_conditioned=bundle.get('varying_goals', True), **spec.world_kwargs), model.senses)
+    control = NumberLine(encoding_seed=bundle['encoding_seed'], goal_conditioned=True, boundary_mode=boundary, **spec.world_kwargs)
     moves = tuple(control.diagnostic_state()['move_decoding'])
     rng = random.Random(derive(seed, 'benchmark-random-moves'))
     before = model.parameters()
@@ -178,7 +180,7 @@ def benchmark(directory, bundle, tasks, *, seed):
         raise AssertionError('frozen benchmark changed sensory parameters')
     result = dict(schema_version='crt-benchmark-v1', model='senses', seed=seed, episodes=len(tasks),
                   generation=bundle['generation'], genotype_id=Species.from_data(bundle['individual']).genotype_id,
-                  boundary_mode=boundary, exact_random_success=random_task_mean([s for s,g in tasks], [g for s,g in tasks], boundary_mode=boundary),
+                  environment=bundle.get('environment','original'), boundary_mode=boundary, exact_random_success=random_task_mean([s for s,g in tasks], [g for s,g in tasks], boundary_mode=boundary, **spec.world_kwargs),
                   outcomes=outcomes, task_source='fresh shared held-out draws; no benchmark learning',
                   random_policy='uniform over all nine movement buttons, including zero; 12 moves')
     for name in ('animal', 'random'):

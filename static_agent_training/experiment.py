@@ -103,8 +103,13 @@ def run_experiment(config, directory, *, resume=False, until_generation=None, pr
     directory = Path(directory)
     if type(champion_count) is not int or champion_count < 1:
         raise ValueError('champion count must be a positive integer')
+    backend_migration = None
     if resume:
         state = load_checkpoint(directory)
+        backend_migration = state.get('backend_migration')
+        if state['config'].get('backend') == 'cuda':
+            backend_migration = dict(previous_backend='cuda', current_backend='native',
+                                     resumed_at_generation=state['next_generation'])
         saved = TrainingConfig.from_data(state['config'])
         if replace(config, generations=saved.generations) != saved:
             raise ValueError('resume must retain the saved experiment configuration')
@@ -122,12 +127,24 @@ def run_experiment(config, directory, *, resume=False, until_generation=None, pr
             raise ValueError('output directory is not empty; use --resume or a new directory')
         directory.mkdir(parents=True, exist_ok=True)
         population = initialize_population(config, progress)
-        history, split, first = [], partitions(config.seed, include_zero=config.include_zero and config.varying_goals), 0
+        history, split, first = [], partitions(config.seed, include_zero=config.include_zero and config.varying_goals, environment=config.environment), 0
         state = dict(schema_version='crt-training-v1', config=asdict(config), next_generation=0,
                      history=history, partitions=split, population=[p.to_data() for p in population])
         write_json(directory / CHECKPOINT, state)
     speciation_state = state.get('speciation_state')
-    write_json(directory / 'config.json', dict(config=asdict(config), partitions=split))
+    if config.initial_population and not resume:
+        from .populations import read_population
+        imported = read_population(config.initial_population)
+        write_json(directory/'initial-population.json.gz',imported)
+        write_json(directory/'candidate-import.json',dict(source=config.initial_population,
+            source_environment=imported['config'].get('environment','original'),target_environment=config.environment,
+            model=config.model,saved_candidates=len(imported['members']),population=config.population,
+            mappings='fixed-sense mappings retained' if config.model=='senses' else 'matching categorical entries retained; unseen tokens initialized',
+            extra_slots='deterministic mutated descendants'))
+    metadata = dict(config=asdict(config), partitions=split)
+    if backend_migration:
+        metadata['backend_migration'] = backend_migration
+    write_json(directory / 'config.json', metadata)
     update_champion_collection(directory, champion_count)
     if progress:
         progress(dict(phase='ready', generation=first, history=history))
@@ -135,6 +152,8 @@ def run_experiment(config, directory, *, resume=False, until_generation=None, pr
     for generation in range(first, last):
         del state
         record, detail, lifetime_population = evaluate_generation(population, config, generation, split, progress, return_lifetime=True)
+        from .populations import update_best
+        update_best(directory,population,record['individuals'],config,generation)
         champion = population[record['champion_index']]
         next_population, ancestry, species_report, speciation_state = reproduce(
             population, record['individuals'], config, generation, progress,
@@ -159,6 +178,8 @@ def run_experiment(config, directory, *, resume=False, until_generation=None, pr
         update_champion_collection(directory, champion_count, record)
         state = dict(schema_version='crt-training-v1', config=asdict(config), next_generation=generation + 1,
                      history=history, partitions=split, population=[p.to_data() for p in next_population], speciation_state=speciation_state)
+        if backend_migration:
+            state['backend_migration'] = backend_migration
         write_json(directory / CHECKPOINT, state)
         population = next_population
         # Release the old serialized population and episode logs before the next
@@ -177,6 +198,9 @@ def main():
     parser.add_argument('--config', type=Path, help='full saved training configuration for a new run')
     parser.add_argument('--resume', type=Path)
     parser.add_argument('--population', type=int)
+    parser.add_argument('--initial-population', help='saved top-performer population to seed a new session')
+    parser.add_argument('--population-save-count', type=int)
+    parser.add_argument('--environment', choices=('original', 'shifted'))
     parser.add_argument('--model', choices=('categorical', 'senses'))
     parser.add_argument('--receptors', type=int)
     parser.add_argument('--generations', type=int)
@@ -185,8 +209,9 @@ def main():
     parser.add_argument('--champion-count', type=int, default=10, help='number of distinct generation champions indexed by training success')
     parser.add_argument('--elites', type=int)
     parser.add_argument('--tournament-size', type=int)
+    parser.add_argument('--encoding-seed', type=int)
     parser.add_argument('--seed', type=int)
-    parser.add_argument('--backend', choices=('python', 'native', 'cuda'))
+    parser.add_argument('--backend', choices=('python', 'native'))
     parser.add_argument('--workers', type=int)
     parser.add_argument('--batch-size', type=int)
     parser.add_argument('--distance-distribution', choices=('normal', 'uniform'))
@@ -206,8 +231,8 @@ def main():
     try:
         if args.resume:
             if any(getattr(args, name) is not None for name in
-                   ('output', 'config', 'population', 'model', 'receptors', 'episodes', 'assessment_episodes', 'elites',
-                    'tournament_size', 'seed', 'no_learning', 'fixed_goal', 'backend', 'workers', 'batch_size', 'distance_distribution', 'distance_mean', 'distance_stddev', 'speciation', 'speciation_threshold', 'max_species', 'boundary_mode', 'include_zero', 'inherit_lifetime')):
+                   ('output', 'config', 'population', 'model', 'receptors', 'environment', 'initial_population', 'population_save_count', 'episodes', 'assessment_episodes', 'elites',
+                    'tournament_size', 'seed', 'encoding_seed', 'no_learning', 'fixed_goal', 'backend', 'workers', 'batch_size', 'distance_distribution', 'distance_mean', 'distance_stddev', 'speciation', 'speciation_threshold', 'max_species', 'boundary_mode', 'include_zero', 'inherit_lifetime')):
                 parser.error('resume uses saved configuration; only --generations and --no-live may override')
             config = TrainingConfig.from_data(load_checkpoint(args.resume)['config'])
             if args.generations is not None:
@@ -215,7 +240,7 @@ def main():
             directory = args.resume
         else:
             values = {name: getattr(args, name) for name in
-                      ('population', 'model', 'receptors', 'generations', 'episodes', 'assessment_episodes', 'elites', 'tournament_size', 'seed', 'backend', 'workers', 'batch_size', 'distance_distribution', 'distance_mean', 'distance_stddev', 'speciation', 'speciation_threshold', 'max_species', 'boundary_mode', 'include_zero', 'inherit_lifetime')
+                      ('population', 'model', 'receptors', 'environment', 'initial_population', 'population_save_count', 'generations', 'episodes', 'assessment_episodes', 'elites', 'tournament_size', 'seed', 'encoding_seed', 'backend', 'workers', 'batch_size', 'distance_distribution', 'distance_mean', 'distance_stddev', 'speciation', 'speciation_threshold', 'max_species', 'boundary_mode', 'include_zero', 'inherit_lifetime')
                       if getattr(args, name) is not None}
             if 'population' in values and 'elites' not in values:
                 values['elites'] = min(5, values['population'] - 1)

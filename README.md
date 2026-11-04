@@ -11,7 +11,7 @@ support evolutionary generations, mutation, selection, checkpoints and resume.
 Fixed-structure lifetime learning remains a separate experiment mode.
 
 A lambda-repertoire evolutionary training system with local lifetime learning,
-replayable checkpoints, optional native CPU/CUDA evaluation, and a WSL/Windows
+replayable checkpoints, optional native CPU evaluation, and a WSL/Windows
 browser playground.
 
 Start with `./train`, inspect background runs with `./train status`, and open the
@@ -464,28 +464,24 @@ within the next generation is reflected when that generation finishes.
 
 Optional acceleration preserves sequential lifetime learning while evaluating
 independent animals in parallel. Choose `--backend python` (the original
-reference), `--backend native` (compiled C++ with CPU workers), or `--backend cuda`
-(CUDA via CuPy). The default remains `python`. The launcher uses the project's
+reference) or `--backend native` (compiled C++ with CPU workers). The default remains `python`. The launcher uses the project's
 `.venv/bin/python` when that environment exists.
 
 ```sh
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-accelerated.txt
-# For an NVIDIA GPU with a CUDA 13-compatible driver:
-.venv/bin/python -m pip install -r requirements-cuda.txt
 
 ./train --backend native --workers 8 --batch-size 1024 --population 1024 --generations 150 --episodes 100 --assessment-episodes 100
-./train --backend cuda --batch-size 1024 --population 1024
 ```
 
 The native backend needs `g++` with OpenMP support; compiled libraries are cached
-under `~/.cache/static-agent-training`. CUDA kernels use CuPy's compilation cache.
-The optional dependencies and CUDA compiler components are isolated in the virtual
-environment. An unavailable requested backend fails rather than silently falling
-back. The backend, worker count, and batch size are saved in the configuration and
-retained on resume. The status view identifies each run's backend.
+under `~/.cache/static-agent-training`. NumPy is the only optional accelerated
+Python dependency. New sessions support Python and native CPU evaluation.
+Saved configurations from the retired CUDA backend load using native CPU with an
+explicit migration notice; the model weights and historical results are retained.
+Resumed runs record this backend migration in their configuration and checkpoint.
 
-Both compiled paths use double precision, separate per-animal MT19937 streams
+The compiled evaluator uses double precision, separate per-animal MT19937 streams
 initialized directly from the reference Python RNG states, fixed repertoire edges,
 sequential empirical updates, delayed compatibility correction, and the same
 world limits. No target distance or movement policy is inserted into evaluation.
@@ -504,15 +500,13 @@ Measure throughput on this machine:
 ```
 
 This benchmarks whole generation evaluation, including batch packing, RNG setup,
-GPU transfers, metrics, and champion replay, after compilation warmup. It excludes
+metrics and champion replay, after compilation warmup. It excludes
 population initialization, reproduction, and checkpoint writes from the timed
 samples (initialization time is recorded separately). The Python reference is
 measured only up to 64 animals by default; change `--python-limit` to measure
 larger populations. Genotypes are independently initialized with common seeds;
 results represent the initial population, and evolved populations may take longer.
 The JSON report includes all samples, medians, and resulting fitness summaries.
-CUDA is available as a backend, but the measured fastest backend should determine
-which one is used for a larger experiment.
 
 The playground's **Best candidate from run** selector loads the strongest saved
 training performer from a chosen run, including runs still in progress. Scores,
@@ -636,7 +630,7 @@ and shows the exact random success probability for the entered start and goal.
 Saved training/assessment scores and independent benchmark results retain the
 rules used when they were collected; the view identifies those original boundary
 rules. Faithful exported historical replays continue to reproduce their saved
-rules. New CPU/CUDA training and random baselines use the same hard-wall semantics.
+rules. New native CPU training and random baselines use the same hard-wall semantics.
 
 A controlled target-location diagnostic is available:
 
@@ -723,3 +717,8 @@ structural correction and the next prediction. The sensory model preserves the
 two-stage learning schedule but changes the prediction objective, output-policy
 coupling and shared structural credit assignment. Tooling parity does not imply
 identical learning dynamics. Reproduce with `./project trace-learning`.
+
+Training setup now includes original `[-20,20]` and shifted `[30,70]` environments,
+saving top candidates and loading them into another ordinary evolutionary session.
+See [the environment and population guide](USE.md#shifted-environment-and-reusable-populations)
+for the choose environment → train → save candidates → load candidates → train workflow.

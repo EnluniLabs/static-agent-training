@@ -6,6 +6,7 @@ import math
 from pathlib import Path
 import random
 
+from .environments import environment_spec
 from .agent import Agent, run_episode
 from .candidates import load_saved_candidate
 from .environment import NumberLine, Output
@@ -35,18 +36,19 @@ def compare(directory, *, episodes=2000, seed=20261101):
     saved = json.loads((directory / 'config.json').read_text())
     config = saved['config']
     split = saved['partitions']['assessment']
+    spec = environment_spec(config.get('environment', 'original'))
     conditioned = bundle.get('varying_goals', False)
     distribution = config.get('distance_distribution', 'uniform')
     if distribution == 'normal':
         tasks = sample_tasks(derive(seed, 'benchmark-tasks'), episodes, starts=split,
-                             goals=split if conditioned else (0,),
-                             mean=config.get('distance_mean', 10.0), stddev=config.get('distance_stddev', 5.0))
+                             goals=split if conditioned else (spec.center,),
+                             mean=config.get('distance_mean', 10.0), stddev=config.get('distance_stddev', 5.0), **spec.world_kwargs)
     else:
         task_rng = random.Random(derive(seed, 'benchmark-tasks'))
         tasks = []
         for _ in range(episodes):
             start = task_rng.choice(split)
-            goal = task_rng.choice([g for g in split if g != start]) if conditioned else 0
+            goal = task_rng.choice([g for g in split if g != start]) if conditioned else spec.center
             tasks.append((start, goal))
     if bundle.get('model') == 'senses':
         from .experimental.sensory_evolution import benchmark
@@ -58,8 +60,8 @@ def compare(directory, *, episodes=2000, seed=20261101):
     agent = Agent(species.repertoire, maps, learning=False,
                   embedding_seed=derive(seed, 'benchmark-animal-embedding'),
                   output_seed=derive(seed, 'benchmark-animal-output'))
-    animal_world = NumberLine(encoding_seed=bundle['encoding_seed'], goal_conditioned=conditioned, boundary_mode=config.get('boundary_mode','terminate'))
-    random_world = NumberLine(encoding_seed=bundle['encoding_seed'], goal_conditioned=conditioned, boundary_mode=config.get('boundary_mode','terminate'))
+    animal_world = NumberLine(encoding_seed=bundle['encoding_seed'], goal_conditioned=conditioned, boundary_mode=config.get('boundary_mode','terminate'), **spec.world_kwargs)
+    random_world = NumberLine(encoding_seed=bundle['encoding_seed'], goal_conditioned=conditioned, boundary_mode=config.get('boundary_mode','terminate'), **spec.world_kwargs)
     moves = tuple(random_world.diagnostic_state()['move_decoding'])
     move_rng = random.Random(derive(seed, 'benchmark-random-moves'))
     outcomes = []
@@ -79,8 +81,8 @@ def compare(directory, *, episodes=2000, seed=20261101):
                   distance_mean=config.get('distance_mean', 10.0) if distribution == 'normal' else None,
                   distance_stddev=config.get('distance_stddev', 5.0) if distribution == 'normal' else None,
                   random_policy='uniform over nine movement buttons including zero; no expectations; same 12-move limit',
-                  boundary_mode=config.get('boundary_mode','terminate'),
-                  exact_random_success=random_task_mean([s for s,g in tasks], [g for s,g in tasks],boundary_mode=config.get('boundary_mode','terminate')),
+                  environment=config.get('environment','original'), boundary_mode=config.get('boundary_mode','terminate'),
+                  exact_random_success=random_task_mean([s for s,g in tasks], [g for s,g in tasks],boundary_mode=config.get('boundary_mode','terminate'), **spec.world_kwargs),
                   outcomes=outcomes)
     for name in ('animal', 'random'):
         successes = sum(row[name + '_success'] for row in outcomes)

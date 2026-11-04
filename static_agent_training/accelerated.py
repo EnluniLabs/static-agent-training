@@ -1,4 +1,4 @@
-"""Optional native CPU / CUDA lifetime evaluator, with reference RNG streams.
+"""Optional native CPU lifetime evaluator, with reference RNG streams.
 
 Each lane owns its mutable weights and runs lifetime episodes sequentially.
 No reduction or numeric movement policy is performed by the agent.
@@ -12,6 +12,7 @@ import random
 import subprocess
 import tempfile
 
+from .environments import environment_spec
 from .environment import NumberLine
 from .seeds import derive
 
@@ -53,28 +54,17 @@ def _cpu_kernel(capacity):
     return function
 
 
-@lru_cache(maxsize=16)
-def _cuda_kernel(capacity):
-    try:
-        import cupy as cp
-        if cp.cuda.runtime.getDeviceCount() < 1:
-            raise ValueError('No CUDA device available')
-        return cp.RawKernel(SOURCE.read_text(), 'evaluate_cuda',
-                            options=('-std=c++17', '-DGPU_BUILD', f'-DMAX_Q={capacity}', '--fmad=false'))
-    except ImportError as error:
-        raise ValueError('CUDA evaluation requires CuPy; install requirements-cuda.txt in the virtual environment') from error
-
-
 def _check_allocation(size_bytes):
     # Keep a single evaluator allocation well below the CLI process ceiling.
     if size_bytes > 512 * 1024 * 1024:
         raise MemoryError('Evaluator arrays exceed the 512 MiB safety budget; reduce --batch-size or episode counts')
 
 
-def _pack(population, encoding_seed):
+def _pack(population, encoding_seed, environment="original"):
+    spec = environment_spec(environment)
     np = _numpy()
     conditioned = any(s.startswith('goal_') for s in population[0].inherited.observations)
-    world = NumberLine(encoding_seed=encoding_seed, goal_conditioned=conditioned)
+    world = NumberLine(encoding_seed=encoding_seed, goal_conditioned=conditioned, **spec.world_kwargs)
     observations = tuple(s.token for s in world.observation_tokens)
     outputs = tuple(s.token for s in world.output_tokens)
     size = len(population)
@@ -100,11 +90,11 @@ def _pack(population, encoding_seed):
             edges[index, j] = lookup.get(individual.repertoire.successors.get(q), -1)
     state = world.diagnostic_state()
     obs_lookup = {s: j for j, s in enumerate(observations)}
-    observation_rows = np.array([obs_lookup[state['observation_encoding'][x]] for x in range(-20, 21)], dtype=np.int32)
-    goal_rows = np.array([obs_lookup.get(f'goal_{x:+d}', -1) for x in range(-20, 21)], dtype=np.int32)
+    observation_rows = np.array([obs_lookup[state['observation_encoding'][x]] for x in spec.positions], dtype=np.int32)
+    goal_rows = np.array([obs_lookup.get(f'goal_{x:+d}', -1) for x in spec.positions], dtype=np.int32)
     expectation_rows = np.array([obs_lookup['obs_' + o[len('expect_'):]] for o in outputs[9:]], dtype=np.int32)
-    values = np.array([state['move_decoding'].get(o, state['expectation_decoding'].get(o)) for o in outputs], dtype=np.int32)
-    target_columns = np.array([list(values[9:]).index(x) for x in range(-20, 21)], dtype=np.int32)
+    values = np.array([state['move_decoding'].get(o, state['expectation_decoding'].get(o)) - (spec.center if o.startswith('expect_') else 0) for o in outputs], dtype=np.int32)
+    target_columns = np.array([list(values[9:]).index(x-spec.center) for x in spec.positions], dtype=np.int32)
     return [embedding, output, edges, sizes, observation_rows, goal_rows, expectation_rows, values, target_columns]
 
 
@@ -113,7 +103,8 @@ def _random_states(seeds, phase, kind):
     return np.array([random.Random(derive(seed, phase, kind)).getstate()[1] for seed in seeds], dtype=np.uint32)
 
 
-def _phase(arrays, seeds, starts, goals, *, phase, learning, learning_config, backend, workers, boundary_mode):
+def _phase(arrays, seeds, starts, goals, *, phase, learning, learning_config, backend, workers, boundary_mode, environment="original"):
+    spec = environment_spec(environment)
     np = _numpy()
     embedding, output, edges, sizes, *encoding = arrays
     batch, signals, capacity = embedding.shape
@@ -122,7 +113,7 @@ def _phase(arrays, seeds, starts, goals, *, phase, learning, learning_config, ba
     metrics = np.zeros((batch, count, 11), dtype=np.float64)
     revised = np.zeros((batch, capacity), dtype=np.uint8)
     inputs = [embedding, output, edges, sizes, *encoding,
-              np.asarray(starts, dtype=np.int32), np.asarray(goals, dtype=np.int32),
+              np.asarray(starts, dtype=np.int32)-spec.center, np.asarray(goals, dtype=np.int32)-spec.center,
               _random_states(seeds, phase, 'embedding'),
               _random_states(seeds, phase, 'output')]
     scalar_args = [np.int32(batch), np.int32(capacity), np.int32(signals), np.int32(count)]
@@ -132,19 +123,8 @@ def _phase(arrays, seeds, starts, goals, *, phase, learning, learning_config, ba
         pointers = [ctypes.c_void_p(a.ctypes.data) for a in inputs]
         _cpu_kernel(capacity)(*[int(x) for x in scalar_args], *pointers, *rates,
                               ctypes.c_void_p(metrics.ctypes.data), ctypes.c_void_p(revised.ctypes.data), workers)
-    elif backend == 'cuda':
-        kernel = _cuda_kernel(capacity)
-        import cupy as cp
-        device_inputs = [cp.asarray(a if i < len(inputs)-2 else a.T.copy()) for i, a in enumerate(inputs)]
-        device_metrics = cp.zeros(metrics.shape, dtype=cp.float64)
-        device_revised = cp.zeros(revised.shape, dtype=cp.uint8)
-        kernel(((batch+63)//64,), (64,), (*scalar_args, *device_inputs, *rates, device_metrics, device_revised))
-        metrics = cp.asnumpy(device_metrics)
-        # Training weights continue into frozen assessment; inherited arrays remain separate.
-        embedding[:] = cp.asnumpy(device_inputs[0])
-        output[:] = cp.asnumpy(device_inputs[1])
     else:
-        raise ValueError('backend must be native or cuda')
+        raise ValueError('backend must be native')
     return metrics
 
 
@@ -166,33 +146,34 @@ def _unpack(metrics, starts, goals):
 
 def evaluate_batch(population, training_starts, assessment_starts, *, seeds, encoding_seed=0,
                    training_goals=None, assessment_goals=None, learning=True, learning_config=None,
-                   backend='native', workers=8, return_weights=False, boundary_mode='clamp'):
+                   backend='native', workers=8, return_weights=False, boundary_mode='clamp', environment='original'):
     from .experimental.sensory_genome import SensoryMappings
     if population and isinstance(population[0].inherited, SensoryMappings):
         from .experimental.sensory_accelerated import evaluate_batch as sensory_batch
         return sensory_batch(population, training_starts, assessment_starts, seeds=seeds,
             encoding_seed=encoding_seed, training_goals=training_goals, assessment_goals=assessment_goals,
             learning=learning, learning_config=learning_config, backend=backend, workers=workers,
-            return_weights=return_weights, boundary_mode=boundary_mode)
+            return_weights=return_weights, boundary_mode=boundary_mode, environment=environment)
     from .learning import LearningConfig
+    spec = environment_spec(environment)
     if not population or len(seeds) != len(population):
         raise ValueError('require a seed for each member of a nonempty batch')
     if type(workers) is not int or workers < 1:
         raise ValueError('workers must be a positive integer')
     if not training_starts or not assessment_starts or set(training_starts) & set(assessment_starts):
         raise ValueError('training and assessment starts must be nonempty and disjoint')
-    training_goals = [0]*len(training_starts) if training_goals is None else training_goals
-    assessment_goals = [0]*len(assessment_starts) if assessment_goals is None else assessment_goals
+    training_goals = [spec.center]*len(training_starts) if training_goals is None else training_goals
+    assessment_goals = [spec.center]*len(assessment_starts) if assessment_goals is None else assessment_goals
     for starts, goals in ((training_starts, training_goals), (assessment_starts, assessment_goals)):
         if len(starts) != len(goals) or any(type(s) is not int or type(g) is not int or
-                not -20 <= s <= 20 or not -20 <= g <= 20 or s == g for s, g in zip(starts, goals)):
+                not spec.lower <= s <= spec.upper or not spec.lower <= g <= spec.upper or s == g for s, g in zip(starts, goals)):
             raise ValueError('require matching valid starts and goals that differ')
-    arrays = _pack(population, encoding_seed)
-    if all(x == -1 for x in arrays[5]) and any(g != 0 for g in [*training_goals, *assessment_goals]):
+    arrays = _pack(population, encoding_seed, environment)
+    if all(x == -1 for x in arrays[5]) and any(g != spec.center for g in [*training_goals, *assessment_goals]):
         raise ValueError('nonzero goals require a goal-conditioned animal')
     if boundary_mode not in ('clamp', 'terminate'):
         raise ValueError('boundary mode must be clamp or terminate')
-    settings = dict(boundary_mode=boundary_mode, learning_config=learning_config or LearningConfig(), backend=backend, workers=workers)
+    settings = dict(boundary_mode=boundary_mode, learning_config=learning_config or LearningConfig(), backend=backend, workers=workers, environment=environment)
     training = _phase(arrays, seeds, training_starts, training_goals, phase='training', learning=learning, **settings)
     learned = [arrays[0].copy(), arrays[1].copy()] if return_weights else None
     assessment = _phase(arrays, seeds, assessment_starts, assessment_goals, phase='assessment', learning=False, **settings)
@@ -225,23 +206,24 @@ def assert_equivalent(actual, expected, path='result'):
         raise ValueError(f'Accelerated replay differs at {path}: {actual} != {expected}')
 
 
-def evaluate_frozen(population, starts, goals, *, seeds, encoding_seed=0, backend='native', workers=8, boundary_mode='clamp'):
+def evaluate_frozen(population, starts, goals, *, seeds, encoding_seed=0, backend='native', workers=8, boundary_mode='clamp', environment='original'):
     """Assess supplied immutable weights on arbitrary tasks, with no training block."""
     from .experimental.sensory_genome import SensoryMappings
     if population and isinstance(population[0].inherited, SensoryMappings):
         from .experimental.sensory_accelerated import evaluate_frozen as sensory_frozen
         return sensory_frozen(population, starts, goals, seeds=seeds, encoding_seed=encoding_seed,
-                              backend=backend, workers=workers, boundary_mode=boundary_mode)
+                              backend=backend, workers=workers, boundary_mode=boundary_mode, environment=environment)
     from .learning import LearningConfig
+    spec = environment_spec(environment)
     if not population or len(population)!=len(seeds) or not starts or len(starts)!=len(goals):
         raise ValueError('require nonempty matching populations, seeds, and tasks')
-    if any(type(s) is not int or type(g) is not int or not -20<=s<=20 or not -20<=g<=20 or s==g for s,g in zip(starts,goals)):
+    if any(type(s) is not int or type(g) is not int or not spec.lower<=s<=spec.upper or not spec.lower<=g<=spec.upper or s==g for s,g in zip(starts,goals)):
         raise ValueError('invalid frozen assessment tasks')
     if boundary_mode not in ('clamp','terminate') or type(workers) is not int or workers<1:
         raise ValueError('invalid boundary mode or worker count')
-    arrays=_pack(population,encoding_seed)
-    if all(x==-1 for x in arrays[5]) and any(g!=0 for g in goals):
+    arrays=_pack(population,encoding_seed,environment)
+    if all(x==-1 for x in arrays[5]) and any(g!=spec.center for g in goals):
         raise ValueError('nonzero goals require a goal-conditioned animal')
     metrics=_phase(arrays,seeds,starts,goals,phase='assessment',learning=False,
-                   learning_config=LearningConfig(),backend=backend,workers=workers,boundary_mode=boundary_mode)
+                   learning_config=LearningConfig(),backend=backend,workers=workers,boundary_mode=boundary_mode,environment=environment)
     return [_unpack(row,starts,goals) for row in metrics]

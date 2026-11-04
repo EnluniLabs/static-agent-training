@@ -4,6 +4,7 @@ import gzip
 import json
 from pathlib import Path
 
+from .environments import environment_spec
 from .agent import Agent, run_episode
 from .baseline import random_task_mean
 from .environment import NumberLine
@@ -70,7 +71,7 @@ def export_demo(directory):
         for expected in trace['result']['assessment']['episodes']:
             frames = record_episode(model, expected['start'], expected['goal'],
                 encoding_seed=bundle['encoding_seed'], boundary_mode=bundle['boundary_mode'],
-                goal_conditioned=bundle['varying_goals'])
+                goal_conditioned=bundle['varying_goals'], **environment_spec(bundle.get('environment','original')).world_kwargs)
             if (frames[-1]['success'], frames[-1]['reason']) != (expected['success'], expected['reason']):
                 raise ValueError('sensory assessment replay does not match saved result')
             episodes.append(dict(start=expected['start'], goal=expected['goal'], frames=frames))
@@ -79,7 +80,7 @@ def export_demo(directory):
         destination = directory / 'demo'
         destination.mkdir(exist_ok=True)
         (destination / 'champion.json').write_text(json.dumps(bundle, separators=(',', ':')) + '\n')
-        view = {k:bundle[k] for k in ('generation','training_success','assessment_success','episodes')}
+        view = {k:bundle[k] for k in ('generation','training_success','assessment_success','episodes','environment')}
         (destination / 'index.html').write_text(HTML.replace('__DATA__', json.dumps(view).replace('<', '\\u003c')))
         return destination, bundle
     species = Species.from_data(trace['individual'])
@@ -91,7 +92,7 @@ def export_demo(directory):
                   embedding_seed=derive(seed, 'assessment', 'embedding'),
                   output_seed=derive(seed, 'assessment', 'output'))
     world = RecordingWorld(encoding_seed=config['encoding_seed'],
-                           goal_conditioned=config.get("varying_goals", False), boundary_mode=config.get("boundary_mode", "terminate"))
+                           goal_conditioned=config.get("varying_goals", False), boundary_mode=config.get("boundary_mode", "terminate"), **environment_spec(config.get("environment","original")).world_kwargs)
     episodes = []
     for start, expected in zip(record['assessment_starts'], trace['result']['assessment']['episodes']):
         transitions = run_episode(agent, world, start=start, learn=False, goal=expected.get("goal", 0))
@@ -103,13 +104,13 @@ def export_demo(directory):
                   assessment_success=trace['result']['assessment']['fitness'],
                   individual=trace['individual'], learned_embedding=trace['learned_embedding'],
                   learned_output=trace['learned_output'], assessment_seed=seed,
-                  encoding_seed=config['encoding_seed'], varying_goals=config.get('varying_goals', False), boundary_mode=config.get('boundary_mode', 'terminate'), episodes=episodes)
+                  environment=config.get('environment','original'), encoding_seed=config['encoding_seed'], varying_goals=config.get('varying_goals', False), boundary_mode=config.get('boundary_mode', 'terminate'), episodes=episodes)
     bundle['random_assessment_success'] = random_task_mean(
-        [e['start'] for e in episodes], [e.get('goal', 0) for e in episodes], boundary_mode=bundle['boundary_mode'])
+        [e['start'] for e in episodes], [e.get('goal', 0) for e in episodes], boundary_mode=bundle['boundary_mode'], **environment_spec(bundle.get('environment','original')).world_kwargs)
     destination = directory / 'demo'
     destination.mkdir(exist_ok=True)
     (destination / 'champion.json').write_text(json.dumps(bundle, separators=(',', ':')) + '\n')
-    view = {k: bundle[k] for k in ('generation', 'training_success', 'assessment_success', 'episodes')}
+    view = {k: bundle[k] for k in ('generation', 'training_success', 'assessment_success', 'episodes', 'environment')}
     payload = json.dumps(view).replace('<', '\\u003c')
     (destination / 'index.html').write_text(HTML.replace('__DATA__', payload))
     return destination, bundle
@@ -134,12 +135,12 @@ body{font:17px system-ui;background:#101725;color:#e7edf7;max-width:1050px;margi
 <label>Output step <input id="scrub" type="range" min="0" value="0"></label>
 <p>All assessment attempts are included in their original order. Selection uses the highest training success across saved generation champions; ties use the earliest generation. A successful replay does not imply reliable performance on every start.</p>
 <script>
-const data=__DATA__, $=id=>document.getElementById(id);let ep=0,frame=0,timer=null;
+const data=__DATA__, lower=data.environment==='shifted'?30:-20,upper=lower+40,xpos=n=>50+(n-lower)*22.5,$=id=>document.getElementById(id);let ep=0,frame=0,timer=null;
 $('summary').textContent=`Generation ${data.generation} · Training success ${(data.training_success*100).toFixed(0)}% · Held-out success ${(data.assessment_success*100).toFixed(0)}% (${data.episodes.length} attempts)`;
 data.episodes.forEach((e,i)=>{let o=document.createElement('option');o.value=i;o.textContent=`${i+1}: start ${e.start} — ${e.frames.at(-1).success?'solved':e.frames.at(-1).reason.replaceAll('_',' ')}`;$('episode').append(o)});
-for(let n=-20;n<=20;n+=5){$('ticks').insertAdjacentHTML('beforeend',`<line x1="${500+n*20}" y1="82" x2="${500+n*20}" y2="100" stroke="#7283a0"/><text x="${500+n*20}" y="133" text-anchor="middle" fill="#b8c5d8" font-size="18">${n}</text>`)}
+for(let n=lower;n<=upper;n+=5){$('ticks').insertAdjacentHTML('beforeend',`<line x1="${xpos(n)}" y1="82" x2="${xpos(n)}" y2="100" stroke="#7283a0"/><text x="${xpos(n)}" y="133" text-anchor="middle" fill="#b8c5d8" font-size="18">${n}</text>`)}
 function pause(){clearInterval(timer);timer=null;$('play').textContent='Play'}
-function render(){const fs=data.episodes[ep].frames,f=fs[frame],goal=data.episodes[ep].goal||0,x=Math.max(25,Math.min(975,500+f.position*20));$('target').setAttribute('cx',500+goal*20);$('animal').setAttribute('cx',x);$('position').setAttribute('x',x);$('position').textContent=f.position;$('status').textContent=f.done?(f.success?'Solved — target reached!':`Stopped — ${f.reason.replaceAll('_',' ')}`):f.label;$('detail').textContent=`Step ${frame}/${fs.length-1} · Moves ${f.actions}/12 · ${f.label}`+(f.tested?` · Predictions correct: ${f.correct}/${f.tested}`:'');$('scrub').max=fs.length-1;$('scrub').value=frame;if(f.done)pause()}
+function render(){const fs=data.episodes[ep].frames,f=fs[frame],goal=data.episodes[ep].goal||0,x=Math.max(25,Math.min(975,xpos(f.position)));$('target').setAttribute('cx',xpos(goal));$('animal').setAttribute('cx',x);$('position').setAttribute('x',x);$('position').textContent=f.position;$('status').textContent=f.done?(f.success?'Solved — target reached!':`Stopped — ${f.reason.replaceAll('_',' ')}`):f.label;$('detail').textContent=`Step ${frame}/${fs.length-1} · Moves ${f.actions}/12 · ${f.label}`+(f.tested?` · Predictions correct: ${f.correct}/${f.tested}`:'');$('scrub').max=fs.length-1;$('scrub').value=frame;if(f.done)pause()}
 function step(){if(frame<data.episodes[ep].frames.length-1)frame++;render()}
 $('play').onclick=()=>{if(timer){pause();return}if(frame===data.episodes[ep].frames.length-1)frame=0;timer=setInterval(step,Number($('speed').value));$('play').textContent='Pause';render()};
 $('step').onclick=()=>{pause();step()};$('restart').onclick=()=>{pause();frame=0;render()};$('episode').onchange=()=>{pause();ep=Number($('episode').value);frame=0;render()};$('scrub').oninput=()=>{pause();frame=Number($('scrub').value);render()};$('speed').onchange=()=>{if(timer){pause();$('play').click()}};render();

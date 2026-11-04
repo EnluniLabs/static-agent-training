@@ -79,7 +79,23 @@ class Workspace:
                     continue
         report = read_json(directory / 'report.json')
         schema = report.get('schema_version', '')
-        if schema == 'crt-interface-comparison-v1':
+        if schema == 'crt-frozen-assessment-v1':
+            result['kind']='assessment'
+            result['config']=report['config']
+            result['chart']=dict(x='Frozen population',series=[['success','Mean success'],['random','Random movement']])
+            for i,row in enumerate(report.get('populations',[]),1):
+                if row.get('mean_success') is not None:
+                    result['series'].append(dict(x=i,label=row['name'],success=row['mean_success'],random=report['random_success']))
+            result['limitations']=['Frozen weights as stored in the saved candidate population. No warmup or learning.',
+                'Common assessment tasks may overlap tasks encountered in source training.']
+        elif schema == 'crt-population-benchmark-v1':
+            result['kind']='population-benchmark'
+            result['chart']=dict(x='Saved population',series=[['training','Lifetime training'],['assessment','Frozen assessment'],['random','Random']])
+            for i,row in enumerate(report.get('populations',[]),1):
+                result['series'].append(dict(x=i,label=row['name'],training=row['training_mean'],assessment=row['assessment_mean'],random=report['random_assessment']))
+            result['limitations']=['Fixed structures, common lifetime-learning budgets and frozen assessment; no evolutionary training.',
+                'Benchmarks start from inherited genomes, not saved end-of-lifetime weights. Training-source scores may have different tasks.']
+        elif schema == 'crt-interface-comparison-v1':
             result['kind'] = 'interfaces'
             result['chart'] = dict(x='Completed animal pairs', series=[['old', 'Old categorical'], ['senses', 'Fixed senses'], ['random', 'Random']])
             sums = dict(old=0, senses=0, random=0)
@@ -103,11 +119,22 @@ class Workspace:
                                     'Old-region scores use expanded-world walls and do not isolate original-world retention.',
                                     'The finite sensory converter can lose distinctions on long inputs.']
         elif schema in ('crt-treatment-comparison-v1', 'crt-speciation-comparison-v1'):
-            result['kind'] = 'model-comparison' if report.get('treatment') == 'model' else 'comparison'
+            result['kind'] = 'starting-population-benchmark' if report.get('treatment')=='starting-population' else 'model-comparison' if report.get('treatment') == 'model' else 'comparison'
             result['chart'] = dict(x='Completed seed pair', series=[['control', report.get('control_label', 'Control')], ['treatment', report.get('treatment_label', 'Treatment')]])
             for index, pair in enumerate(report.get('pairs', []), 1):
                 result['series'].append(dict(x=index, label=str(pair['seed']), control=pair.get('control'),
                                              treatment=pair.get(report.get('treatment', 'speciation'))))
+            if report.get('treatment')=='starting-population':
+                result['chart']=dict(x='Generation',series=[['a_training','A · population training'],['b_training','B · population training'],['a_assessment','A · population held-out'],['b_assessment','B · population held-out']])
+                curves={}
+                for arm in report.get('arms',[]):
+                    prefix='b' if arm['enabled'] else 'a'
+                    for point in arm.get('curve',[]):
+                        row=curves.setdefault(point['generation'],{})
+                        row.setdefault(prefix+'_training',[]).append(point['mean'])
+                        row.setdefault(prefix+'_assessment',[]).append(point['assessment_mean'])
+                result['series']=[dict(x=g+1,**{key:sum(values)/len(values) for key,values in row.items()}) for g,row in sorted(curves.items())]
+                result['config']=report['config']
             result['results'] = report.get('pairs', [])
             result['limitations'] = report.get('limitations', [])
         result['artifacts'] = [name for name in result['files'] if name.endswith(('.json', '.json.gz'))]
@@ -137,6 +164,15 @@ class Workspace:
         return path
 
     def post(self, route, data):
+        if route == '/api/save-population':
+            from .populations import save_population
+            from datetime import datetime
+            import uuid
+            directory = self.sessions.path(data.get('run'))
+            output = self.root/'runs/populations'/(datetime.now().strftime('%Y%m%d-%H%M%S-')+uuid.uuid4().hex[:8]+'.json.gz')
+            result = save_population(directory,output,count=data.get('count',10),name=data.get('name') or directory.name)
+            self.invalidate()
+            return result
         if route == '/api/sessions':
             result = self.sessions.launch(data)
         elif route == '/api/stop':
@@ -145,6 +181,8 @@ class Workspace:
             result = self.sessions.resume(data.get('id'), data.get('generations'))
         elif route == '/api/resume-run':
             result = self.sessions.resume_run(data.get('run'), data.get('generations'))
+        elif route == '/api/reset-lifetime':
+            return self.models.reset_lifetime(data)
         elif route == '/api/attempt':
             return self.models.attempt(data)
         else:
