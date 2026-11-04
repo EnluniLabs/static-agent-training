@@ -4,6 +4,7 @@ import fcntl
 from dataclasses import asdict, replace
 from datetime import datetime
 import json
+import hashlib
 import math
 from pathlib import Path
 import signal
@@ -46,8 +47,8 @@ def _history(arm):
 
 def report_for(manifest, status):
     treatment=manifest.get('treatment','speciation')
-    control_label={'learning':'Learning off','inheritance':'Inheritance off','speciation':'Control','model':'Old categorical'}[treatment]
-    treatment_label={'learning':'Learning on','inheritance':'Inheritance on','speciation':'Speciation','model':'Fixed senses'}[treatment]
+    control_label={'learning':'Learning off','inheritance':'Inheritance off','speciation':'Control','model':'Old categorical','starting-population':manifest.get('arm_a_label','Arm A')}[treatment]
+    treatment_label={'learning':'Learning on','inheritance':'Inheritance on','speciation':'Speciation','model':'Fixed senses','starting-population':manifest.get('arm_b_label','Arm B')}[treatment]
     rows=[]
     histories={}
     for arm in manifest['arms']:
@@ -61,7 +62,10 @@ def report_for(manifest, status):
                          completed=len(history),target=manifest['config']['generations'],
                          latest=history[-1] if history else None,
                          final_benchmark=None if not benchmark else {k:benchmark[k] for k in ('episodes','animal','random','exact_random_success','generation')},
-                         state=arm.get('state','queued'),returncode=arm.get('returncode')))
+                         state=arm.get('state','queued'),returncode=arm.get('returncode'),
+                         initial_population=arm.get('initial_population'),starting_source=arm.get('starting_source'),
+                         initialization_seed=arm.get('initialization_seed'),
+                         curve=[{k:r.get(k) for k in ('generation','mean','best','assessment_mean','random_assessment','task_id')} for r in history]))
     pairs=[]
     deltas=[]
     for seed in manifest['seeds']:
@@ -70,12 +74,13 @@ def report_for(manifest, status):
         common=min(len(off),len(on))
         if common:
             identity_key = 'structural_population_id' if treatment == 'model' else 'population_id'
-            if off[0].get(identity_key) is None or off[0][identity_key]!=on[0].get(identity_key):
+            if treatment != 'starting-population' and (off[0].get(identity_key) is None or off[0][identity_key]!=on[0].get(identity_key)):
                 raise ValueError(f'Unmatched initial populations for seed {seed}')
             for a,b in zip(off[:common],on[:common]):
                 if a['task_id']!=b['task_id']:
                     raise ValueError(f'Unmatched tasks for seed {seed}, generation {a["generation"]+1}')
-        paired=dict(seed=seed,common_generations=common,initialization_verified=bool(common),tasks_verified=bool(common))
+        paired=dict(seed=seed,common_generations=common,initialization_verified=bool(common) and treatment!='starting-population',tasks_verified=bool(common),
+                    starting_populations_differ=bool(common and off[0].get('population_id')!=on[0].get('population_id')))
         if common:
             window=min(5,common)
             paired['matched_window_population_training']={
@@ -96,6 +101,8 @@ def report_for(manifest, status):
                 updated=time.time(),population=manifest['config']['population'],generations=manifest['config']['generations'],
                 episodes=manifest['config']['episodes'],assessment_episodes=manifest['config']['assessment_episodes'],
                 benchmark_episodes=manifest['benchmark_episodes'],seeds=manifest['seeds'],
+                config=manifest['config'],
+                starting_population_comparison=treatment=='starting-population',
                 primary_endpoint='success of the highest-training saved champion on fresh shared held-out tasks, with learned weights frozen',
                 boundary_mode=manifest['config'].get('boundary_mode','terminate'),
                 distance_distribution=manifest['config']['distance_distribution'],
@@ -104,15 +111,19 @@ def report_for(manifest, status):
                 model_capacities=None if treatment != 'model' else dict(
                     categorical_parameters_per_state=(82 if manifest['config'].get('varying_goals') else 41) + 50,
                     sensory_parameters_per_state=2 * manifest['config'].get('receptors', 256) + 12),
-                limitations=[] if treatment != 'model' else [
+                limitations=([
+                    'Both arms run full evolutionary training with matched tasks and budgets; starting populations may differ.',
+                    'Final tests freeze training-selected champions. Population curves summarize every evaluated animal.',
+                    'A single seed pair is descriptive, not an estimate of reliable average advantage.'
+                ] if treatment=='starting-population' else []) if treatment != 'model' else [
                     'Whole-model evolutionary comparison: parameter counts, encoding, prediction targets and output normalization differ.',
                     'Initial ordered seed terms, development budgets and repertoires are matched; mappings have model-specific shapes.',
                     'Final rates are training-selected champions; population means are reported separately for each generation.',
-                    'Both models support Python, native CPU and CUDA. Saved per-arm configurations identify the evaluator used.'],
+                    'Both models support Python and native CPU. Saved per-arm configurations identify the evaluator used.'],
                 arms=rows,pairs=pairs,paired_effect=paired_summary(deltas))
 
 
-def _run_study(directory, config=None, *, seeds=(42,43,44), benchmark_episodes=2000, resume=False, runs_root=None, treatment='speciation'):
+def _run_study(directory, config=None, *, seeds=(42,43,44), benchmark_episodes=2000, resume=False, runs_root=None, treatment='speciation', population_a=None, population_b=None, champion_count=10):
     directory=Path(directory).resolve()
     manifest_path=directory/'manifest.json'
     runs_root=Path(runs_root or ROOT/'runs').resolve()
@@ -120,15 +131,30 @@ def _run_study(directory, config=None, *, seeds=(42,43,44), benchmark_episodes=2
         manifest=json.loads(manifest_path.read_text())
         config=TrainingConfig.from_data(manifest['config'])
         treatment=manifest.get('treatment','speciation')
+        if treatment=='starting-population':
+            for arm_name in ('a','b'):
+                source=manifest['source_'+arm_name]
+                if source['kind']=='saved':
+                    snapshot=Path(manifest['population_'+arm_name])
+                    if hashlib.sha256(snapshot.read_bytes()).hexdigest()!=source['snapshot_sha256']:
+                        raise ValueError('Saved starting-candidate snapshot has changed; refusing to resume')
     else:
-        if treatment not in ('learning','speciation','inheritance','model'):
-            raise ValueError('treatment must be learning, inheritance, speciation, or model')
-        if not config or len(set(seeds))!=len(seeds) or not seeds or benchmark_episodes<1:
-            raise ValueError('require a config, unique seeds, and positive benchmark episode count')
+        if treatment not in ('learning','speciation','inheritance','model','starting-population'):
+            raise ValueError('unknown comparison treatment')
+        if not config or len(set(seeds))!=len(seeds) or not seeds or benchmark_episodes<1 or type(champion_count) is not int or champion_count<1:
+            raise ValueError('require a config, unique seeds, and positive benchmark episode and champion counts')
         if directory.exists() and any(directory.iterdir()):
             raise ValueError('comparison output already exists; use --resume')
+        base=replace(config,initial_population=None,initialization_seed=None) if treatment=='starting-population' else replace(config,speciation=False)
+        starting_sources={}
+        if treatment=='starting-population':
+            from .populations import read_population, validate_compatibility
+            for arm_name,path in (('a',population_a),('b',population_b)):
+                if path:
+                    resolved=Path(path).resolve();data=read_population(resolved)
+                    validate_compatibility(data,base,allow_new_environment=True)
+                    starting_sources[arm_name]=(resolved,data)
         directory.mkdir(parents=True,exist_ok=True)
-        base=replace(config,speciation=False)
         if treatment=='learning':
             base=replace(base,learning=False,inherit_lifetime=False)
         elif treatment=='inheritance':
@@ -136,17 +162,37 @@ def _run_study(directory, config=None, *, seeds=(42,43,44), benchmark_episodes=2
         elif treatment=='model':
             base=replace(base,model='categorical')
         manifest=dict(schema_version='crt-treatment-comparison-v1',treatment=treatment,name=directory.name,created=time.time(),
-                      config=asdict(base),seeds=list(seeds),benchmark_episodes=benchmark_episodes,arms=[])
+                      config=asdict(base),seeds=list(seeds),benchmark_episodes=benchmark_episodes,champion_count=champion_count,arms=[])
+        if treatment=='starting-population':
+            from .populations import read_population, validate_compatibility
+            for arm_name,path in (('a',population_a),('b',population_b)):
+                if path:
+                    path,data=starting_sources[arm_name]
+                    frozen=directory/'inputs'/('arm-'+arm_name+'.json.gz')
+                    write_json(frozen,data)
+                    manifest['population_'+arm_name]=str(frozen)
+                    manifest['source_'+arm_name]=dict(kind='saved',name=data['name'],original_path=str(path),
+                        original_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+                        snapshot_sha256=hashlib.sha256(frozen.read_bytes()).hexdigest(),members=len(data['members']))
+                    manifest['arm_'+arm_name+'_label']='Arm '+arm_name.upper()+' · '+data['name']
+                else:
+                    manifest['population_'+arm_name]=None
+                    manifest['source_'+arm_name]=dict(kind='fresh',name='Fresh population')
+                    manifest['arm_'+arm_name+'_label']='Arm '+arm_name.upper()+' · Fresh population'
         for seed in seeds:
             for enabled in (False,True):
-                label=('senses' if enabled else 'categorical') if treatment == 'model' else ((treatment+'-on' if enabled else treatment+'-off') if treatment in ('learning','inheritance') else ('speciation' if enabled else 'control'))
+                label=('b' if enabled else 'a') if treatment=='starting-population' else ('senses' if enabled else 'categorical') if treatment == 'model' else ((treatment+'-on' if enabled else treatment+'-off') if treatment in ('learning','inheritance') else ('speciation' if enabled else 'control'))
                 name=f'{directory.name}-s{seed}-'+label
                 run=runs_root/name
                 if run.exists():
                     raise ValueError(f'run directory already exists: {run}')
                 manifest['arms'].append(dict(seed=seed,enabled=enabled,
                                              model=enabled if treatment == 'model' else False,
-                                             speciation=enabled if treatment=='speciation' else False,
+                                             **{'starting-population':enabled},
+                                             initial_population=manifest.get('population_b' if enabled else 'population_a') if treatment=='starting-population' else config.initial_population,
+                                             starting_source=manifest.get('source_b' if enabled else 'source_a'),
+                                             initialization_seed=derive(seed,'starting-population','b' if enabled else 'a') if treatment=='starting-population' else config.initialization_seed,
+                                             speciation=enabled if treatment=='speciation' else base.speciation if treatment=='starting-population' else False,
                                              learning=enabled if treatment=='learning' else base.learning,
                                              inherit_lifetime=enabled if treatment=='inheritance' else base.inherit_lifetime,
                                              inheritance=enabled if treatment=='inheritance' else base.inherit_lifetime,run_name=name,
@@ -174,12 +220,13 @@ def _run_study(directory, config=None, *, seeds=(42,43,44), benchmark_episodes=2
                     model = ('senses' if arm['enabled'] else 'categorical') if treatment == 'model' else config.model
                     arm_config=replace(config,seed=seed,speciation=arm['speciation'],learning=arm.get('learning',config.learning),
                                        inherit_lifetime=arm.get('inherit_lifetime',config.inherit_lifetime),model=model,
-                                       backend=config.backend)
+                                       backend=config.backend,initial_population=arm.get('initial_population'),
+                                       initialization_seed=arm.get('initialization_seed'))
                     path=directory/(arm['run_name']+'-config.json')
                     write_json(path,asdict(arm_config))
                     args=['--config',str(path),'--output',str(run)]
                 with open(arm['log'],'ab') as log:
-                    process=subprocess.Popen([sys.executable,'-u','-m','static_agent_training.experiment',*args,'--no-live'],
+                    process=subprocess.Popen([sys.executable,'-u','-m','static_agent_training.experiment',*args,'--no-live','--champion-count',str(manifest.get('champion_count',10))],
                                              cwd=ROOT,stdout=log,stderr=log,stdin=subprocess.DEVNULL)
                 arm.update(state='running',pid=process.pid)
                 active.append((arm,process))
@@ -201,7 +248,7 @@ def _run_study(directory, config=None, *, seeds=(42,43,44), benchmark_episodes=2
                 save()
                 result=compare(arm['directory'],episodes=manifest['benchmark_episodes'],seed=derive(seed,treatment+'-final-benchmark'))
                 arm['state']='completed'
-                label=('fixed senses' if arm['enabled'] else 'old categorical') if treatment == 'model' else ((treatment+' on' if arm['enabled'] else treatment+' off') if treatment in ('learning','inheritance') else ('speciation' if arm['speciation'] else 'control'))
+                label=(manifest['arm_b_label'] if arm['enabled'] else manifest['arm_a_label']) if treatment=='starting-population' else ('fixed senses' if arm['enabled'] else 'old categorical') if treatment == 'model' else ((treatment+' on' if arm['enabled'] else treatment+' off') if treatment in ('learning','inheritance') else ('speciation' if arm['speciation'] else 'control'))
                 print(f"seed {seed} | {label} | fresh held-out {result['animal']['success_rate']:.2%}",flush=True)
                 save()
         status='completed'
@@ -266,7 +313,17 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--memory-limit-mb', type=int, default=4096)
     parser.add_argument('--output',type=Path)
-    parser.add_argument('--treatment',choices=('speciation','learning','inheritance','model'),default='speciation')
+    parser.add_argument('--treatment',choices=('speciation','learning','inheritance','model','starting-population'),default='speciation')
+    parser.add_argument('--population-a',type=Path,help='saved starting candidates for arm A; omit for fresh')
+    parser.add_argument('--population-b',type=Path,help='saved starting candidates for arm B; omit for fresh')
+    parser.add_argument('--population-save-count',type=int,default=10)
+    parser.add_argument('--champion-count',type=int,default=10)
+    parser.add_argument('--encoding-seed',type=int,default=0)
+    parser.add_argument('--fixed-goal',action='store_true')
+    parser.add_argument('--no-learning',action='store_true')
+    parser.add_argument('--inherit-lifetime',action=argparse.BooleanOptionalAction,default=False)
+    parser.add_argument('--speciation',action=argparse.BooleanOptionalAction,default=False)
+    parser.add_argument('--environment',choices=('original','shifted'),default='original')
     parser.add_argument('--model',choices=('categorical','senses'),default='categorical')
     parser.add_argument('--receptors',type=int,default=256)
     parser.add_argument('--runs-root',type=Path,help='directory for both training arms; defaults to project runs/')
@@ -277,7 +334,7 @@ def main():
     parser.add_argument('--assessment-episodes',type=int,default=200)
     parser.add_argument('--benchmark-episodes',type=int,default=2000)
     parser.add_argument('--seeds',type=int,nargs='+',default=[42,43,44])
-    parser.add_argument('--backend',choices=['python','native','cuda'],default='native')
+    parser.add_argument('--backend',choices=['python','native'],default='native')
     parser.add_argument('--workers',type=int,default=8)
     parser.add_argument('--batch-size',type=int,default=1024)
     parser.add_argument('--speciation-threshold',type=float,default=.6)
@@ -290,12 +347,14 @@ def main():
                           assessment_episodes=args.assessment_episodes,elites=min(5,args.population-1),
                           backend=args.backend,workers=args.workers,batch_size=args.batch_size,
                           speciation_threshold=args.speciation_threshold,max_species=args.max_species,
-                          distance_mean=args.distance_mean,distance_stddev=args.distance_stddev,receptors=args.receptors,model=args.model)
+                          distance_mean=args.distance_mean,distance_stddev=args.distance_stddev,receptors=args.receptors,model=args.model,environment=args.environment,encoding_seed=args.encoding_seed,varying_goals=not args.fixed_goal,
+                          learning=not args.no_learning,inherit_lifetime=args.inherit_lifetime,speciation=args.speciation,
+                          population_save_count=args.population_save_count)
     print(f'Comparison: {directory}',flush=True)
     try:
         from .diagnostics import diagnostics
         with diagnostics(directory, args.memory_limit_mb):
-            result=run_study(directory,config,seeds=args.seeds,benchmark_episodes=args.benchmark_episodes,resume=bool(args.resume),treatment=args.treatment,runs_root=args.runs_root)
+            result=run_study(directory,config,seeds=args.seeds,benchmark_episodes=args.benchmark_episodes,resume=bool(args.resume),treatment=args.treatment,runs_root=args.runs_root,population_a=args.population_a,population_b=args.population_b,champion_count=args.champion_count)
     except KeyboardInterrupt:
         print(f'Stopped. Resume with: ./train compare --resume {directory}',flush=True)
         raise SystemExit(130)

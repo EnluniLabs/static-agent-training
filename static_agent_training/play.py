@@ -10,6 +10,7 @@ import subprocess
 import webbrowser
 from urllib.parse import parse_qs, quote, urlsplit
 
+from .environments import environment_spec
 from .agent import Agent, run_episode
 from .candidates import CandidateStore, attach_benchmark, load_saved_candidate
 from .environment import Output
@@ -28,21 +29,22 @@ def attempt(bundle, start, goal, seed, policy="animal"):
         raise ValueError('Unknown policy')
     if any(type(v) is not int for v in (start, goal, seed)):
         raise ValueError('Start, goal, and seed must be integers')
-    if not (-20 <= start <= 20 and -20 <= goal <= 20):
-        raise ValueError('Start and goal must be between -20 and 20')
+    spec = environment_spec(bundle.get('environment','original'))
+    if not (spec.lower <= start <= spec.upper and spec.lower <= goal <= spec.upper):
+        raise ValueError(f'Start and goal must be between {spec.lower} and {spec.upper}')
     if not 0 <= seed <= 2**32 - 1:
         raise ValueError('Seed must be between 0 and 4294967295')
     if bundle.get('model') == 'senses':
         from .experimental.sensory_playback import attempt as sensory_attempt
         return sensory_attempt(bundle, start, goal, seed, policy)
     conditioned = bundle.get('varying_goals', False) or policy == 'random'
-    if not conditioned and goal != 0:
+    if not conditioned and goal != spec.center:
         raise ValueError("This older animal was trained only toward zero and has no goal input. Use a new varying-goal run for custom goals")
     if start == goal:
         frames = [dict(position=start, actions=0, label='Already at goal', done=True,
                        success=True, reason='target', correct=0, tested=0)]
     elif policy == 'random':
-        world = RecordingWorld(encoding_seed=bundle['encoding_seed'], goal_conditioned=conditioned, boundary_mode="clamp")
+        world = RecordingWorld(encoding_seed=bundle['encoding_seed'], goal_conditioned=conditioned, boundary_mode="clamp", **spec.world_kwargs)
         rng = random.Random(derive(seed, 'interactive', 'random'))
         moves = tuple(world.diagnostic_state()['move_decoding'])
         transition = world.reset(start=start, goal=goal)
@@ -57,7 +59,7 @@ def attempt(bundle, start, goal, seed, policy="animal"):
         agent = Agent(species.repertoire, mappings, learning=False,
                       embedding_seed=derive(seed, 'interactive', 'embedding'),
                       output_seed=derive(seed, 'interactive', 'output'))
-        world = RecordingWorld(encoding_seed=bundle['encoding_seed'], goal_conditioned=conditioned, boundary_mode="clamp")
+        world = RecordingWorld(encoding_seed=bundle['encoding_seed'], goal_conditioned=conditioned, boundary_mode="clamp", **spec.world_kwargs)
         run_episode(agent, world, start=start, goal=goal, learn=False)
         frames = world.frames
         for frame in frames:
@@ -65,8 +67,8 @@ def attempt(bundle, start, goal, seed, policy="animal"):
                 position = int(frame['label'].split()[-1])
                 frame['label'] = f'Predict next position {position}'
     return dict(start=start, goal=goal, seed=seed, policy=policy, frames=frames,
-                lower=-20, upper=20, boundary_mode="clamp",
-                random_expected_success=random_success(start,goal,boundary_mode="clamp"))
+                lower=spec.lower, upper=spec.upper, boundary_mode="clamp",
+                random_expected_success=random_success(start,goal,boundary_mode="clamp", **spec.world_kwargs))
 
 
 PAGE = '''<!doctype html><html lang="en"><meta charset="utf-8">
@@ -147,6 +149,9 @@ def handler_for(bundle, *, status_root=ROOT):
                         self.send(200, json.dumps(workspace.runs()))
                     elif parsed.path == '/api/run':
                         self.send(200, json.dumps(workspace.detail(arg('run'))))
+                    elif parsed.path == '/api/populations':
+                        from .populations import list_populations
+                        self.send(200,json.dumps(list_populations(workspace.root)))
                     elif parsed.path == '/api/models':
                         self.send(200, json.dumps(workspace.models.snapshots(arg('run'), arg('model', 'baseline'))))
                     elif parsed.path == '/api/export':

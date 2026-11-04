@@ -32,15 +32,6 @@ class SensoryAcceleratedTests(unittest.TestCase):
     def test_native_lifetime_metrics_and_all_learned_parameters(self):
         self.check_backend('native')
 
-    def test_cuda_lifetime_metrics_and_all_learned_parameters(self):
-        try:
-            import cupy as cp
-            if cp.cuda.runtime.getDeviceCount()<1:
-                self.skipTest('CUDA device unavailable')
-        except ImportError:
-            self.skipTest('CuPy unavailable')
-        self.check_backend('cuda')
-
     def test_generation_batching_inheritance_and_reference_trace(self):
         config = TrainingConfig(model='senses',population=3,elites=1,episodes=6,assessment_episodes=6,
                                 initial_pairs=2,chain_budget=8,inherit_lifetime=True)

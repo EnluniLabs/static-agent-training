@@ -3,6 +3,7 @@
 from collections import Counter
 import math
 
+from .environments import environment_spec
 from .agent import Agent, run_episode
 from .environment import NumberLine
 from .mappings import LifetimeMappings
@@ -26,7 +27,7 @@ def _block(agent, environment, starts, *, learn, goals=None):
             largest = max(logits.values())
             loss += largest - logits[target] + math.log(math.fsum(math.exp(v - largest) for v in logits.values()))
         outputs = [e['output'] for e in events if e['kind'] == 'OUTPUT']
-        episodes.append(dict(start=start, goal=0 if goals is None else goals[index], success=transitions[-1].success,
+        episodes.append(dict(start=start, goal=environment.default_goal if goals is None else goals[index], success=transitions[-1].success,
                              reason=transitions[-1].reason, outputs=len(outputs),
                              actions=sum(o.startswith('move_') for o in outputs),
                              expectations=sum(o.startswith('expect_') for o in outputs),
@@ -45,7 +46,7 @@ def _block(agent, environment, starts, *, learn, goals=None):
 
 
 def evaluate(individual, training_starts, assessment_starts, *, seed, encoding_seed=0,
-             learning=True, learning_config=None, training_goals=None, assessment_goals=None, boundary_mode="clamp"):
+             learning=True, learning_config=None, training_goals=None, assessment_goals=None, boundary_mode="clamp", environment="original"):
     if not training_starts or not assessment_starts:
         raise ValueError('training and assessment blocks must be nonempty')
     if set(training_starts) & set(assessment_starts):
@@ -55,14 +56,14 @@ def evaluate(individual, training_starts, assessment_starts, *, seed, encoding_s
                   embedding_seed=derive(seed, 'training', 'embedding'),
                   output_seed=derive(seed, 'training', 'output'),
                   learning=learning, learning_config=learning_config)
-    training = _block(agent, NumberLine(encoding_seed=encoding_seed, goal_conditioned=conditioned, boundary_mode=boundary_mode), training_starts,
+    training = _block(agent, NumberLine(encoding_seed=encoding_seed, goal_conditioned=conditioned, boundary_mode=boundary_mode, **environment_spec(environment).world_kwargs), training_starts,
                       learn=learning, goals=training_goals)
     # Independent RNG and weight copies prevent assessment changing the training lifetime.
     assessor = Agent(individual.repertoire, LifetimeMappings(agent.mappings),
                      embedding_seed=derive(seed, 'assessment', 'embedding'),
                      output_seed=derive(seed, 'assessment', 'output'), learning=False,
                      learning_config=learning_config)
-    assessment = _block(assessor, NumberLine(encoding_seed=encoding_seed, goal_conditioned=conditioned, boundary_mode=boundary_mode), assessment_starts,
+    assessment = _block(assessor, NumberLine(encoding_seed=encoding_seed, goal_conditioned=conditioned, boundary_mode=boundary_mode, **environment_spec(environment).world_kwargs), assessment_starts,
                         learn=False, goals=assessment_goals)
     result = dict(genotype_id=individual.genotype_id, seed=seed, training=training, assessment=assessment,
                   repertoire_size=len(individual.repertoire.pairs),

@@ -20,11 +20,14 @@ KINDS = {
     'senses': ('Fixed-senses adaptation', 'static_agent_training.experimental.bit_experiment'),
     'interfaces': ('Old vs fixed senses', 'static_agent_training.experimental.model_comparison'),
     'comparison': ('Baseline treatment comparison', 'static_agent_training.comparison'),
+    'starting-population-benchmark': ('Evolutionary starting-population benchmark', 'static_agent_training.comparison'),
+    'assessment': ('Frozen population assessment','static_agent_training.assessments'),
+    'population-benchmark': ('Saved population benchmark', 'static_agent_training.populations'),
     'model-comparison': ('Evolutionary model comparison', 'static_agent_training.comparison'),
 }
 
 TRAINING = ('training', 'sensory-training')
-COMPARISONS = ('comparison', 'model-comparison')
+COMPARISONS = ('comparison', 'model-comparison', 'starting-population-benchmark')
 
 
 def integer(config, key, default, low=1, high=1_000_000):
@@ -67,6 +70,15 @@ class SessionManager:
             raise ValueError('Unknown run')
         return path
 
+    def population_path(self, relative):
+        parent = (self.root/'runs/populations').resolve()
+        if not isinstance(relative,str):
+            raise ValueError('Choose a saved population')
+        path = (self.root/'runs'/relative).resolve()
+        if not path.is_relative_to(parent) or not path.is_file() or not path.name.endswith('.json.gz'):
+            raise ValueError('Unknown saved population')
+        return path
+
     def records(self):
         with self.lock:
             records = []
@@ -104,13 +116,45 @@ class SessionManager:
     def command(self, kind, config, directory):
         if kind not in KINDS or not isinstance(config, dict):
             raise ValueError('Choose a supported session type and configuration')
+        if kind == 'assessment':
+            if set(config)-{'populations','environment','episodes','seed','workers','boundary_mode','notes'}:
+                raise ValueError('Frozen assessments only accept assessment settings')
+            selected=config.get('populations',[])
+            if not isinstance(selected,list) or not 1<=len(selected)<=32 or any(not isinstance(x,str) for x in selected) or len(set(selected))!=len(selected):
+                raise ValueError('Choose one or more distinct saved populations, at most 32')
+            paths=[self.population_path(value) for value in selected]
+            environment=config.get('environment','original')
+            from .assessments import validate_inputs
+            validate_inputs(paths,environment)
+            boundary=config.get('boundary_mode','clamp')
+            if boundary not in ('clamp','terminate'):
+                raise ValueError('Unknown boundary mode')
+            return KINDS[kind][1],['--output',str(directory),'--populations',*[str(p) for p in paths],
+                '--environment',environment,'--episodes',str(integer(config,'episodes',200)),
+                '--seed',str(integer(config,'seed',48,0,2**32-1)),'--workers',str(integer(config,'workers',4,1,1024)),
+                '--boundary-mode',boundary]
+        if kind == 'population-benchmark':
+            from .environments import environment_spec
+            selected = config.get('populations',[])
+            if set(config)-{'populations','environment','episodes','assessment_episodes','seed','backend','workers','notes'}:
+                raise ValueError('Unsupported population benchmark settings')
+            if not isinstance(selected,list) or not 2 <= len(selected) <= 32 or len(set(selected))!=len(selected):
+                raise ValueError('Choose at least two distinct saved populations')
+            environment = config.get('environment','original'); environment_spec(environment)
+            backend = config.get('backend','native')
+            if backend not in ('native',):
+                raise ValueError('Population benchmark requires native CPU evaluation')
+            return KINDS[kind][1], ['benchmark','--output',str(directory),'--populations',
+                *[str(self.population_path(value)) for value in selected],'--environment',environment,'--backend',backend,
+                '--episodes',str(integer(config,'episodes',100)),'--assessment-episodes',str(integer(config,'assessment_episodes',200)),
+                '--seed',str(integer(config,'seed',48,0,2**32-1)),'--workers',str(integer(config,'workers',4,1,1024))]
         allowed = {'episodes', 'assessment_episodes', 'seed', 'notes'}
         if kind in (*TRAINING, *COMPARISONS, 'interfaces'):
             allowed |= {'population', 'memory_limit_mb'}
         if kind in (*TRAINING, *COMPARISONS):
-            allowed |= {'generations', 'backend', 'workers', 'batch_size'}
-        if kind in TRAINING:
-            allowed |= {'learning', 'inherit_lifetime', 'speciation', 'champion_count'}
+            allowed |= {'generations', 'backend', 'workers', 'batch_size', 'environment'}
+        if kind in (*TRAINING,'starting-population-benchmark'):
+            allowed |= {'learning', 'inherit_lifetime', 'speciation', 'champion_count', 'initial_population', 'population_save_count'}
         if kind in ('senses', 'sensory-training', 'model-comparison'):
             allowed |= {'receptors'}
         if kind == 'senses':
@@ -119,6 +163,8 @@ class SessionManager:
             allowed |= {'receptors', 'seeds'}
         if kind in COMPARISONS:
             allowed |= {'seeds', 'treatment', 'benchmark_episodes', 'model', 'receptors'}
+        if kind == 'starting-population-benchmark':
+            allowed |= {'population_a','population_b'}
         if set(config) - allowed:
             raise ValueError('Unsupported settings: ' + ', '.join(sorted(set(config) - allowed)))
         notes = config.get('notes', '')
@@ -132,13 +178,28 @@ class SessionManager:
             args += ['--population', str(integer(config, 'population', 16 if kind == 'interfaces' else 32, 1 if kind == 'interfaces' else 2)),
                      '--memory-limit-mb', str(integer(config, 'memory_limit_mb', 4096, 256, 131072))]
         if kind in (*TRAINING, *COMPARISONS):
+            from .environments import environment_spec
+            environment = config.get('environment','original'); environment_spec(environment)
+            args += ['--environment',environment]
             backend = config.get('backend', 'native')
-            if backend not in ('python', 'native', 'cuda'):
+            if backend not in ('python', 'native'):
                 raise ValueError('Unknown evaluator backend')
             args += ['--generations', str(integer(config, 'generations', 50)), '--backend', backend,
                      '--workers', str(integer(config, 'workers', 4, 1, 1024)),
                      '--batch-size', str(integer(config, 'batch_size', 256))]
         if kind in TRAINING:
+            args += ['--population-save-count',str(integer(config,'population_save_count',10))]
+            if config.get('initial_population'):
+                from .populations import read_population, validate_compatibility
+                from .evolution import TrainingConfig
+                source = self.population_path(config['initial_population'])
+                saved = read_population(source)
+                imported = saved['config']
+                validate_compatibility(saved,TrainingConfig(model='senses' if kind=='sensory-training' else 'categorical',
+                    environment=environment,receptors=config.get('receptors',256),
+                    varying_goals=imported.get('varying_goals',False),encoding_seed=imported.get('encoding_seed',0)),allow_new_environment=True)
+                args += ['--initial-population',str(source),'--encoding-seed',str(imported.get('encoding_seed',0))]
+                if not imported.get('varying_goals',False):args.append('--fixed-goal')
             args += ['--model', 'senses' if kind == 'sensory-training' else 'categorical']
             args += ['--elites', str(min(5, config.get('population', 32) - 1)), '--no-live',
                      '--champion-count', str(integer(config, 'champion_count', 10))]
@@ -152,7 +213,7 @@ class SessionManager:
                 raise ValueError('Receptor count must be a multiple of 16')
             args += ['--receptors', str(receptors)]
         if kind in ('interfaces', *COMPARISONS):
-            seeds = config.get('seeds', [48, 49, 50])
+            seeds = [integer(config,'seed',48,0,2**32-1)] if kind=='starting-population-benchmark' else config.get('seeds', [48, 49, 50])
             if (not isinstance(seeds, list) or not 1 <= len(seeds) <= 32 or
                     any(type(s) is not int or not 0 <= s <= 2**32 - 1 for s in seeds) or len(set(seeds)) != len(seeds)):
                 raise ValueError('Provide up to 32 distinct integer seeds')
@@ -162,8 +223,31 @@ class SessionManager:
             if model not in ('categorical', 'senses'):
                 raise ValueError('Unknown model')
             args += ['--model', model]
-            treatment = 'model' if kind == 'model-comparison' else config.get('treatment', 'learning')
-            if treatment not in ('learning', 'inheritance', 'speciation', 'model'):
+            if kind=='starting-population-benchmark':
+                from .populations import read_population, validate_compatibility
+                from .evolution import TrainingConfig
+                sources={}
+                for arm in ('a','b'):
+                    selected=config.get('population_'+arm)
+                    if selected:
+                        path=self.population_path(selected); saved=read_population(path)
+                        sources[arm]=(path,saved)
+                modes={(saved['config'].get('encoding_seed',0),saved['config'].get('varying_goals',False)) for _,saved in sources.values()}
+                if len(modes)>1:
+                    raise ValueError('Both starting populations must use the same action encoding and goal-input mode')
+                encoding,goals=next(iter(modes)) if modes else (0,True)
+                shared=TrainingConfig(model=model,environment=environment,receptors=config.get('receptors',256),encoding_seed=encoding,varying_goals=goals)
+                for arm,(path,saved) in sources.items():
+                    validate_compatibility(saved,shared,allow_new_environment=True)
+                    args+=['--population-'+arm,str(path)]
+                args+=['--encoding-seed',str(encoding),'--population-save-count',str(integer(config,'population_save_count',10)),
+                       '--champion-count',str(integer(config,'champion_count',10))]
+                if not goals:args.append('--fixed-goal')
+                if not boolean(config,'learning',True):args.append('--no-learning')
+                args.append('--inherit-lifetime' if boolean(config,'inherit_lifetime',False) else '--no-inherit-lifetime')
+                args.append('--speciation' if boolean(config,'speciation',False) else '--no-speciation')
+            treatment = 'starting-population' if kind=='starting-population-benchmark' else 'model' if kind == 'model-comparison' else config.get('treatment', 'learning')
+            if treatment not in ('learning', 'inheritance', 'speciation', 'model','starting-population'):
                 raise ValueError('Unknown treatment')
             args += ['--treatment', treatment, '--benchmark-episodes', str(integer(config, 'benchmark_episodes', 2000))]
             args += ['--runs-root', str(self.root / 'runs')]
@@ -259,7 +343,7 @@ class SessionManager:
                 raise ValueError('This run already has an active session')
             kind, directory = record['kind'], Path(record['directory'])
             required = {'training': 'checkpoint.json.gz', 'sensory-training': 'checkpoint.json.gz',
-                        'interfaces': 'plan.json', 'comparison': 'manifest.json', 'model-comparison': 'manifest.json'}
+                        'interfaces': 'plan.json', 'comparison': 'manifest.json', 'model-comparison': 'manifest.json', 'starting-population-benchmark':'manifest.json'}
             if kind not in required:
                 raise ValueError('Fixed-senses adaptation does not yet support resume')
             if not (directory / required[kind]).is_file():
@@ -317,7 +401,7 @@ class SessionManager:
                     kind = 'interfaces'
                     config = read_json(directory / 'plan.json')
                 elif (directory / 'manifest.json').is_file():
-                    kind = 'model-comparison' if report.get('treatment') == 'model' else 'comparison'
+                    kind = 'starting-population-benchmark' if report.get('treatment')=='starting-population' else 'model-comparison' if report.get('treatment') == 'model' else 'comparison'
                     config = read_json(directory / 'manifest.json').get('config', {})
                     # Check the comparison parent as well as any active arms.
                     from .status import training_processes

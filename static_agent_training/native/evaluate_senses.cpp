@@ -20,11 +20,8 @@ DEVICE void sensory_one(int lane,SPARAMS){
     const int* edges=successor+lane*Q;
     unsigned char* rev=revised+lane*Q;
     int count=sizes[lane];
-#ifdef GPU_BUILD
-    int stride=B;unsigned int* erng=embed_draws+lane;unsigned int* orng=output_draws+lane;
-#else
     int stride=1;unsigned int* erng=embed_draws+lane*625;unsigned int* orng=output_draws+lane*625;
-#endif
+
     double logits[MAX_Q];int active[MAX_R+1],sources[16];unsigned char pending_bits[16][MAX_R];
     double emitted_loss[16];
     for(int e=0;e<E;++e){
@@ -75,11 +72,7 @@ DEVICE void sensory_one(int lane,SPARAMS){
         }
     }
 }
-#ifdef GPU_BUILD
-extern "C" __global__ void evaluate_senses_cuda(SPARAMS){int lane=blockIdx.x*blockDim.x+threadIdx.x;if(lane<B)sensory_one(lane,SARGS);}
-#else
 extern "C" void evaluate_senses_cpu(SPARAMS,int workers){
     #pragma omp parallel for schedule(static) num_threads(workers)
     for(int lane=0;lane<B;++lane)sensory_one(lane,SARGS);
 }
-#endif

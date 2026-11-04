@@ -4,7 +4,7 @@ The experimental model lives in `static_agent_training.experimental`. Its defaul
 experiment now uses an animal-owned sensory apparatus, rather than the earlier
 position/goal byte-slot prototype. The sensory model now uses the shared
 evolutionary trainer as well as the standalone adaptation experiment. Existing
-categorical checkpoints and native/CUDA evaluation remain supported unchanged.
+categorical checkpoints and native CPU evaluation remain supported.
 
 ## Evolutionary training
 
@@ -17,7 +17,7 @@ parameters after redevelopment; newly discovered states receive deterministic
 parameters. Receptor capacity does not change. Learned-weight inheritance is
 optional, disabled by default. Generational checkpoints resume or extend through
 the same trainer; champion traces retain the trained sensory model for frozen
-playback and benchmarks. Both models support Python reference, native CPU and CUDA evaluation. Accelerated training replays the selected champion through Python and checks its results.
+playback and benchmarks. Both models support Python reference and native CPU evaluation. Accelerated training replays the selected champion through Python and checks its results.
 
 The visualizer exposes **Fixed-senses model → Evolutionary training** and
 **Compare both models → Evolutionary comparison**, both with generations.
@@ -156,7 +156,7 @@ tournament selection, elites, speciation, optional learned-weight inheritance,
 checkpoint resume/extension, saved champion collections, frozen benchmarks,
 standalone replay exports, goal-input audits, and the visualizer.
 
-Both models support `--backend python`, `native`, and `cuda`. Each accelerated
+Both models support `--backend python` and `native`. Each accelerated
 sensory lane owns its bias, shared input weights, action/prediction gates and
 prediction logits. Episodes within a lifetime remain sequential. Training weights
 continue into frozen assessment; assessment updates never enter reproduction.
@@ -178,7 +178,7 @@ Examples:
 ./project compare --treatment model --backend native --population 32 --generations 50
 ./project compare --model senses --treatment learning --backend native --population 32 --generations 50
 ./project audit latest-sensory-training --sample 8 --repeats 1
-./project speed --models categorical senses --backends native cuda --populations 32 --repeats 2
+./project speed --models categorical senses --backends python native --populations 32 --repeats 2
 ```
 
 Receptor encoding and factorized prediction remain intentional differences from

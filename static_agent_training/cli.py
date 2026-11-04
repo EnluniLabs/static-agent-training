@@ -31,6 +31,8 @@ Run tools (only when explicitly invoked):
   benchmark RUN [options]    Frozen trained champion versus random movement
   audit RUN [options]        Goal-input and movement diagnostics for either model
   speed [options]            Evaluator throughput benchmark
+  assess [options]           Frozen saved-population assessment
+  populations save|benchmark Save reusable populations or compare several sets
   trace-learning [options]   Record one learning event in both models
   demo [RUN] [options]       Model workspace (optional legacy baseline source)
   ui [options]              Model workspace, session control and playground
@@ -87,7 +89,7 @@ def main(root, argv=None):
     try:
         if command == 'runs':
             parser = argparse.ArgumentParser(prog='./project runs')
-            parser.add_argument('--kind', choices=('training', 'sensory-training', 'senses', 'comparison', 'model-comparison', 'interfaces'))
+            parser.add_argument('--kind', choices=('training', 'sensory-training', 'senses', 'comparison', 'model-comparison', 'interfaces', 'population-benchmark','starting-population-benchmark','assessment'))
             parser.add_argument('--limit', type=int, default=20)
             parser.add_argument('--all', action='store_true')
             parser.add_argument('--json', action='store_true')
@@ -139,7 +141,7 @@ def main(root, argv=None):
         if command == 'doctor':
             argparse.ArgumentParser(prog='./project doctor').parse_args(args)
             print(f'Project: {root}\nPython: {sys.executable}\nVersion: {sys.version.split()[0]}')
-            for name in ('numpy', 'cupy'):
+            for name in ('numpy',):
                 print(f'Optional {name}: ' + ('installed' if importlib.util.find_spec(name) else 'not installed'))
             print(f'C++ compiler: {shutil.which("c++") or "not found"}')
             print(f'Free disk: {shutil.disk_usage(root).free / 2**30:.1f} GiB')
@@ -163,7 +165,7 @@ def main(root, argv=None):
             return
         modules = dict(status='status', compare='comparison', senses='experimental.bit_experiment',
                        benchmark='benchmark', audit='bias_audit', speed='speed', demo='play',
-                       ui='play', **{'trace-learning': 'learning_trace', 'compare-models': 'experimental.model_comparison'})
+                       ui='play', assess='assessments', populations='populations', **{'trace-learning': 'learning_trace', 'compare-models': 'experimental.model_comparison'})
         if command not in modules:
             raise ValueError(f'Unknown command: {command}. Use ./project help.')
         help_requested = any(a in ('-h', '--help') for a in args)

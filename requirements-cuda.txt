@@ -1,2 +1,0 @@
--r requirements-accelerated.txt
-cupy-cuda13x[ctk]>=14,<15

@@ -15,7 +15,7 @@ HELP = '''Usage:
   ./train resume                  Resume the most recently checkpointed run
   ./train resume runs/my-run      Resume a specific run
   ./train --population 64 --generations 100
-  ./train --backend cuda --population 1024
+  ./train --backend native --workers 8 --population 1024
   ./train --distance-mean 10 --distance-stddev 5
 
 Defaults: 32 animals, 50 generations, seed 42; automatic unique run folder.

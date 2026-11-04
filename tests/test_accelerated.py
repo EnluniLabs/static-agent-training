@@ -17,16 +17,6 @@ from static_agent_training.repertoire import Repertoire
 NUMPY = importlib.util.find_spec('numpy') is not None
 
 
-def cuda_available():
-    if not importlib.util.find_spec('cupy'):
-        return False
-    try:
-        import cupy
-        return cupy.cuda.runtime.getDeviceCount() > 0
-    except Exception:
-        return False
-
-
 @unittest.skipUnless(NUMPY, 'optional NumPy acceleration is not installed')
 class AcceleratedTests(unittest.TestCase):
     def config(self, **kwargs):
@@ -71,12 +61,6 @@ class AcceleratedTests(unittest.TestCase):
         self.compare('native',conditioned=False)
         self.compare('native',learning=False)
 
-    @unittest.skipUnless(cuda_available(), 'CUDA device / CuPy unavailable')
-    def test_cuda_matches_actions_predictions_learning_and_learned_weights(self):
-        self.compare('cuda')
-        self.compare('cuda',conditioned=False)
-        self.compare('cuda',learning=False)
-
     def test_terminal_empty_and_internal_limit(self):
         config=self.config()
         population=initialize_population(config)
@@ -93,7 +77,7 @@ class AcceleratedTests(unittest.TestCase):
             for token in row:
                 row[token]=1000.0 if token=='expect_+0' else -1000.0
         expectations=replace(base,inherited=InheritedMappings.from_data(data))
-        for backend in ['native']+(['cuda'] if cuda_available() else []):
+        for backend in ['native']:
             members=[terminal,no_pairs,expectations]
             results=evaluate_batch(members,[1,2],[3,4],seeds=[1,2,3],backend=backend)
             for i,individual in enumerate(members):

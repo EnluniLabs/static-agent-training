@@ -19,7 +19,7 @@ def main():
     parser.add_argument('--repeats', type=int, default=3)
     parser.add_argument('--workers', type=int, default=8)
     parser.add_argument('--batch-size', type=int, default=1024)
-    parser.add_argument('--backends', nargs='+', choices=['python', 'native', 'cuda'], default=['python', 'native', 'cuda'])
+    parser.add_argument('--backends', nargs='+', choices=['python', 'native'], default=['python', 'native'])
     parser.add_argument('--python-limit', type=int, default=64)
     parser.add_argument('--output', type=Path, default=Path('runs/speed-benchmark.json'))
     args = parser.parse_args()

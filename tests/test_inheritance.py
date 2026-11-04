@@ -56,9 +56,6 @@ class InheritanceTests(unittest.TestCase):
         p=initialize_population(c);split=partitions(c.seed,include_zero=True)
         reference,_,expected=evaluate_generation(p,c,0,split,return_lifetime=True)
         backends=['native']
-        if importlib.util.find_spec('cupy'):
-            import cupy
-            if cupy.cuda.runtime.getDeviceCount():backends.append('cuda')
         for backend in backends:
             actual,_,parents=evaluate_generation(p,replace(c,backend=backend,batch_size=3),0,split,return_lifetime=True)
             assert_equivalent(actual,reference)

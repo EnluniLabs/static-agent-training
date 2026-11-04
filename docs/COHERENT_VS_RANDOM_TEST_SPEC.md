@@ -165,7 +165,7 @@ wall-clock time and equal evaluation count are different comparisons.
 3. Test an isomorphic graph relabeling with correspondingly permuted weights
    and controlled RNG; outputs, updates, and fitness should match.
 4. Check anonymous-node serialization, replay, hashing, mutation, and
-   terminal-edge behavior. Verify Python and optional native CPU/CUDA
+   terminal-edge behavior. Verify Python and optional native CPU
    parity **before** trusting accelerated comparisons.
 5. Record graph sizes and compute costs. Never silently skip a backend or
    reinterpret failed reduction as a random-node edge.

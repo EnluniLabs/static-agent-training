@@ -31,11 +31,11 @@ def distance_weights(distances, mean=10.0, stddev=5.0):
     return weights
 
 
-def sample_tasks(seed, count, *, starts, goals, mean=10.0, stddev=5.0):
+def sample_tasks(seed, count, *, starts, goals, mean=10.0, stddev=5.0, lower=-20, upper=20):
     if type(count) is not int or count < 1:
         raise ValueError('task count must be a positive integer')
     starts, goals = tuple(sorted(set(starts))), tuple(sorted(set(goals)))
-    if not starts or not goals or any(type(x) is not int or x not in POSITIONS for x in (*starts, *goals)):
+    if not starts or not goals or any(type(x) is not int or not lower <= x <= upper for x in (*starts, *goals)):
         raise ValueError('require valid nonempty start and goal positions')
     buckets = {}
     for start in starts:

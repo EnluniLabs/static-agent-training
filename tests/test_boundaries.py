@@ -52,7 +52,7 @@ class BoundaryTests(unittest.TestCase):
         self.assertEqual(TrainingConfig().boundary_mode,'clamp')
 
     @unittest.skipUnless(importlib.util.find_spec('numpy'),'optional NumPy is unavailable')
-    def test_native_cuda_and_reference_agree_at_walls_and_on_legacy_mode(self):
+    def test_native_and_reference_agree_at_walls_and_on_legacy_mode(self):
         config=TrainingConfig(population=4,elites=1,episodes=4,assessment_episodes=4,
                               initial_pairs=2,chain_budget=16,seed=19)
         population=initialize_population(config)
@@ -74,9 +74,6 @@ class BoundaryTests(unittest.TestCase):
             fixed.append(replace(species,inherited=InheritedMappings.from_data(data)))
         self.assertTrue(fixed)
         backends=['native']
-        if importlib.util.find_spec('cupy'):
-            import cupy
-            if cupy.cuda.runtime.getDeviceCount():backends.append('cuda')
         for mode in ('clamp','terminate'):
             seeds=list(range(len(fixed)))
             expected=[evaluate(p,[19,-19],[18,-18],seed=i,training_goals=[20,-20],assessment_goals=[20,-20],

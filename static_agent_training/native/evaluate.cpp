@@ -1,12 +1,8 @@
-// One independent lifetime per lane. The same code runs on CPU and CUDA.
-#ifndef GPU_BUILD
+// One independent lifetime per CPU lane.
 #include <math.h>
-#endif
-#ifdef GPU_BUILD
-#define DEVICE __device__
-#else
+
 #define DEVICE inline
-#endif
+
 #ifndef MAX_Q
 #define MAX_Q 256
 #endif
@@ -53,15 +49,10 @@ DEVICE void evaluate_one(int lane, PARAMS) {
     const int* edges=successor+lane*Q;
     unsigned char* rev=revised+lane*Q;
     const int count=sizes[lane];
-#ifdef GPU_BUILD
-    const int rng_stride=B;
-    unsigned int* erng=embed_draws+lane;
-    unsigned int* orng=output_draws+lane;
-#else
     const int rng_stride=1;
     unsigned int* erng=embed_draws+lane*625;
     unsigned int* orng=output_draws+lane*625;
-#endif
+
     double logits[MAX_Q], probabilities[41];
     int pending_sources[16], pending_predictions[16];
     double pending_losses[16][41];
@@ -134,14 +125,7 @@ DEVICE void evaluate_one(int lane, PARAMS) {
     }
 }
 
-#ifdef GPU_BUILD
-extern "C" __global__ void evaluate_cuda(PARAMS) {
-    const int lane=blockIdx.x*blockDim.x+threadIdx.x;
-    if(lane<B)evaluate_one(lane,ARGS);
-}
-#else
 extern "C" void evaluate_cpu(PARAMS, int workers) {
     #pragma omp parallel for schedule(static) num_threads(workers)
     for(int lane=0;lane<B;++lane)evaluate_one(lane,ARGS);
 }
-#endif
