@@ -1,0 +1,53 @@
+# Static Agent — Jargon and Connections
+# Living glossary. Add terms as they arise; do not claim equivalence where only an analogy exists.
+# Status labels: IMPLEMENTED / PLANNED / ANALOGY / OPEN QUESTION.
+
+## Representations and prediction
+- Fixed-sense bit encoding [IMPLEMENTED]: component-based representation of sensory observations. Connections: distributed representations, binary feature encoding. Not necessarily a learned embedding.
+- Dual-rail receptors [IMPLEMENTED]: separate indicators for bit values. Connection: one-hot/bipolar feature coding; inspect exact encoder before claiming equivalence.
+- Bernoulli cross-entropy / negative log-likelihood [IMPLEMENTED]: per-bit prediction loss for binary sensory outcomes. Connection: probabilistic binary classification.
+- Logistic sigmoid [IMPLEMENTED]: maps a bit logit to its predicted probability.
+- Softmax [IMPLEMENTED]: normalizes state-selection logits into a categorical distribution.
+- Linear feature model [IMPLEMENTED]: sensory features plus bias feed repertoire-state logits. Connection: multinomial logistic regression / single-layer classifier; not evidence that the entire system is a conventional neural network.
+- Prediction gate [IMPLEMENTED]: chooses whether to predict or act. Connections: stochastic policy gating, mixture-of-experts gating (analogy only).
+
+## Learning and credit assignment
+- Online learning [IMPLEMENTED]: parameters update during an animal's lifetime after observations.
+- Local credit assignment [IMPLEMENTED]: empirical error updates the emitting prediction state rather than all states.
+- Delayed structural correction [IMPLEMENTED]: a revised state is checked against its fixed successor on a later encounter; then the sensory-to-state mapping may be corrected. Connections: delayed credit assignment and consistency constraints, but not automatically backpropagation.
+- Shared-feature generalization [IMPLEMENTED]: updates to weights shared by sensory components can affect other inputs.
+- Negative transfer / interference [OBSERVED]: a change helpful for one input harms another; demonstrated in the native error-propagation audit.
+- Representation aliasing [POSSIBLE]: distinct inputs can map to the same repertoire state and share prediction parameters. Test whether this causes undesirable transfer.
+- Catastrophic interference [RELATED TERM]: repeated learning overwrites previously useful knowledge; the current single-update interference test alone does not establish catastrophic forgetting.
+- Ablation study [PLANNED]: disable a component (e.g. lifetime learning) to isolate its causal contribution.
+- Counterfactual control [TEST DESIGN]: compare related and unrelated sensory inputs without giving them feedback.
+
+## Formal structure and evolution
+- Untyped lambda calculus [IMPLEMENTED]: formal language used to generate and develop repertoire terms.
+- Beta reduction / normal form [IMPLEMENTED DURING DEVELOPMENT]: computation used to establish coherent successors; no runtime reduction during an animal's lifetime.
+- Immutable repertoire / fixed transition graph [IMPLEMENTED]: inherited term-pair nodes and successor edges remain fixed during lifetime learning.
+- Genetic programming [RELATED FIELD]: evolving program-like formal structures; compare carefully with this project's specific development and mutation process.
+- Neuro-symbolic AI [BROAD CATEGORY]: systems combining symbolic structures and statistical learning. Descriptive umbrella, not a novelty claim.
+- Neuroevolution [RELATED FIELD]: evolutionary search over architectures/parameters; this project evolves inherited repertoires and mappings.
+- Lamarckian inheritance [OPTIONAL EXPERIMENT]: transmitting learned lifetime weights to descendants; disabled by default.
+- Coherent vs randomized repertoire [PLANNED CONTROL]: isolate whether lambda-derived structural relationships improve performance beyond graph topology and learned mappings.
+- Shared lambda-term identity across packages [PLANNED]: reuse of canonical term identities for repertoire composition; distinguish term-level from pair-level indexing in current code.
+
+## Experimental conventions
+- Training fitness [IMPLEMENTED]: success on training episodes used for evolutionary selection.
+- Held-out evaluation [IMPLEMENTED]: frozen, training-selected champions tested on reserved tasks; not necessarily wholly unseen states.
+- Paired-seed experiment [IMPLEMENTED]: compare architectures under matched random seeds and task budgets.
+- Confidence interval [IMPLEMENTED IN REPORTING]: estimated uncertainty around an aggregate effect; a range crossing zero does not establish superiority.
+- Learning curve / sample efficiency [PLANNED ANALYSIS]: performance versus generations, episodes, or evaluation budget.
+- Generalization [RESEARCH QUESTION]: improvement on inputs/tasks not directly trained; distinguish feature transfer, shared-state transfer, and structural transfer.
+- Causal attribution [RESEARCH QUESTION]: show which mechanism drives improvements using matched controls and ablations.
+
+## Questions to revisit
+1. Does coherent lambda-derived structure outperform size/topology-matched random successors?
+2. When does shared-component transfer help versus cause interference?
+3. Are gains due to better representation, altered prediction frequency, or structural correction?
+4. What is the precise learned-state indexing granularity: term, pair, or mapping?
+5. Which established architectures are mathematically equivalent to subcomponents, and which comparisons remain only analogies?
+
+## Maintenance rule
+For each new concept add: project mechanism; conventional term; relationship (equivalent / similar / analogy / different); evidence or code pointer; open question. Prefer precise terminology over novelty claims.

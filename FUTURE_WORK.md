@@ -484,3 +484,18 @@ restarting it or changing its configuration.
   the completed run or deleting local results, and persist publication status so
   retries and watcher restarts do not create duplicate records.
 - Expose publication status and the resulting GitHub link in the visualizer.
+
+## Playground lifetime-learning attribution and transfer
+
+Status: **future investigation** (discussion 2026-11-02). The user observed that a saved champion with roughly 50% frozen held-out benchmark success did not reliably solve manually selected playground tasks. This observation does **not** establish the cause: task sampling, different learned-state restoration, disabled learning, and differences in evaluation protocol must be checked first.
+
+**Question:** How much task performance depends on inherited competence, within-lifetime adaptation before evaluation, and continued learning during an interactive attempt? Does evolution favor genotypes that are especially capable of learning (a possible Baldwin-effect interpretation), rather than genotypes that are immediately competent?
+
+- Verify the exact benchmark-to-playground state handoff: inherited genotype, developed repertoire, saved learned mappings, task partition, episode reset behavior, and whether updates are enabled. Confirm that the frozen champion's saved learned state is loaded, rather than silently reverting to inherited weights.
+- Add or use a playground learning ON/OFF toggle, learning-state reset, and event trace for observation, prediction, empirical update, and delayed structural update. Keep the original inherited state recoverable.
+- Run matched conditions: (A) learning disabled during preparation and evaluation; (B) learning during preparation then frozen evaluation; (C) learning during preparation and continued online learning during evaluation. Match initial animal, tasks, random streams where possible, and experience budgets.
+- Replay identical manually chosen tasks and compare with randomly sampled benchmark tasks. Record per-task outcomes, adaptation curves, and performance on **unseen** tasks after interactive learning; avoid conflating improvement on repeated tasks with generalization.
+- Compare both categorical and fixed-sense architectures across multiple seeds. Report within-run changes, between-seed variance, and whether learned-state restoration explains the playground discrepancy.
+- Distinguish online learning, continual learning, learning-to-learn/evolvability, and the Baldwin effect. A Baldwin-effect claim requires evidence that evolutionary selection favors the *capacity to acquire* useful behavior; a strong adapted champion alone is insufficient.
+
+Do not alter ongoing benchmark runs for this follow-up.

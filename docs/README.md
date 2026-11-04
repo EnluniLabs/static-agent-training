@@ -3,6 +3,7 @@
 | Document | Purpose |
 |---|---|
 | [USE.md](../USE.md) | Command guide, run tracking, artifacts and cleanup |
+| [Living glossary](JARGON.txt) | Static-agent concepts and related ML terminology |
 | [Project README](../README.md) | Detailed baseline algorithms and options |
 | [Implementation boundaries](IMPLEMENTATION.md) | Existing baseline behavior and attribution limits |
 | [Baseline environment contract](specs/ENVIRONMENT_INTERFACE.md) | Number-line observations, actions and feedback |
