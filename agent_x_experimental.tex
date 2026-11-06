@@ -1,0 +1,76 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\title{Agent X Experimental\\\large Parallel Sensory Embedding and Structural Activation}
+\author{Ryan MacDonald}
+\date{November 2026}
+\begin{document}
+\maketitle
+
+\section{Status and Purpose}
+This document records a proposed experimental revision of the static-agent architecture. It is a design proposal, not a claim that the changes have been implemented or experimentally validated. The objective is to remove the single-chain activation bottleneck while retaining the existing lambda-pair repertoire, structural continuation, and prediction-based correction mechanisms as much as possible.
+
+\section{Current Limitation}
+The existing fixed-sense path encodes a whole sensory observation and selects one lambda pair. A single active pair then follows its structural continuation and produces an action or a predicted observation. This restricts the execution path to one active structural trajectory at a time, even when the sensory observation contains several independently meaningful components. Consequently, the system cannot directly exploit several simultaneously activated chains as components of a more complex structural explanation.
+
+\section{Partitioned Sensory Input}
+Let $S_t$ be the complete sensory observation at time $t$. A fixed converter partitions it into $n$ regions:
+\[
+C(S_t)=(s_{t,1},s_{t,2},\ldots,s_{t,n}).
+\]
+Initially, regions should be fixed, non-overlapping, and configurable. Each region is independently embedded in the existing lambda-pair repertoire $\Lambda$:
+\[
+\lambda_{t,i}\in\operatorname*{arg\,max}_{\lambda\in\Lambda}
+P(\lambda\mid s_{t,i}).
+\]
+When several pairs have exactly equal maximum scores, select uniformly among those tied pairs using a seeded random generator. Pairs below the maximum are never sampled. This is deterministic selection except for exact ties; it is not a permanent mapping lock. Multiple regions may select the same pair. Region identity and signal content should be handled consistently, with the precise encoding specified during implementation.
+
+The active state is now a collection of pair activations rather than one pointer:
+\[
+A_t=\{\lambda_{t,1},\ldots,\lambda_{t,n}\}.
+\]
+The collection may retain multiplicity if two regions activate the same pair. Each activation may follow the existing structural continuation independently. The implementation must not silently discard all but one selected pair.
+
+\section{Parallel Expectations}
+Each active chain may produce an expectation of the \emph{complete} next sensory observation, not a prediction restricted to its input region:
+\[
+\lambda_{t,i}\longrightarrow \widehat{S}_{t+1}^{(i)}.
+\]
+When $S_{t+1}$ arrives, every pending expectation is compared independently with the same complete observation:
+\[
+L_i=\ell\!\left(\widehat{S}_{t+1}^{(i)},S_{t+1}\right).
+\]
+Initially preserve the existing bitwise prediction-loss and empirical correction rules where applicable. A chain that predicts incorrectly receives its own correction; another chain's prediction is evaluated separately. Structural corrections should retain their existing causal association with the source prediction and continuation. Multiple pending predictions must therefore be tracked separately, including when activations refer to the same pair.
+
+No expectation deconverter or aggregation into one prediction is proposed.
+
+\section{Actions and Interface}
+A reserved subset of output signals is hardcoded to environmental actions. Other generated signals are interpreted as expectations. The environment interface, not a learned decoder, resolves simultaneous action signals emitted in one time step.
+
+The initial interface must specify deterministic, reproducible rules for no action, duplicate actions, and conflicting distinct actions. These rules should be simple, explicit, and configurable where practical. Their exact policy is an implementation decision to document, not an additional learned mechanism.
+
+\section{Structural Evolution}
+The repertoire should evolve structures more aggressively, without replacing the current representation. Inspect the existing mutation operators and increase opportunities for chain extension and reuse or connection of existing structures \emph{where already supported}. Do not equate structural progress merely with adding isolated pairs. Keep original mutation settings available as an experimental baseline, and report which operators and probabilities changed.
+
+\section{Research Implications}
+Parallel activation allows several competing conjectures about the same next observation to coexist. This creates room for future counterfactual modeling, but parallel predictions alone do not constitute action-conditioned counterfactual reasoning. That would require explicit treatment of alternative conditions or actions and careful handling of unobserved alternatives.
+
+A separate hypothesis concerns environmental foliation: a signal mapped to a pair identifies a chain that may participate in larger coherent structures. Environments exhibiting compatible structures may preferentially interact with those mappings, potentially localizing interference. This remains a hypothesis, not a guaranteed consequence of argmax; shared embedding weights may still create cross-signal interference.
+
+\section{Implementation Scope and Experiments}
+\begin{enumerate}[leftmargin=*]
+\item Implement configurable fixed sensory partitions and independent argmax embedding with seeded uniform tie-breaking.
+\item Support multiple simultaneous chain activations and separately tracked complete-signal expectations.
+\item Preserve existing learning and continuation rules as far as possible; explicitly document unavoidable changes.
+\item Retain hardcoded action signals and define a simple interface conflict policy. Do not add a learned output decoder.
+\item Make structural mutation settings more aggressive and configurable within the current repertoire representation.
+\item Update Python and native evaluation paths consistently, and test their behavioral parity.
+\item Compare old and new configurations under matched seeds, training budgets, and evaluation conditions. Measure held-out performance, retention, number of active chains, structural complexity, prediction diversity, and action conflicts.
+\end{enumerate}
+
+\section{Open Implementation Questions}
+The following details should be resolved before claiming the design is fully specified: how fixed regions are represented and padded; whether duplicate pair activations are treated independently; how long each activation persists; how output signals are classified; which simultaneous-action arbitration rule is chosen; and whether the existing repertoire supports structural composition beyond linear successor traversal.
+
+\end{document}
