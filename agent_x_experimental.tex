@@ -54,6 +54,15 @@ The initial interface must specify deterministic, reproducible rules for no acti
 \section{Structural Evolution}
 The repertoire should evolve structures more aggressively, without replacing the current representation. Inspect the existing mutation operators and increase opportunities for chain extension and reuse or connection of existing structures \emph{where already supported}. Do not equate structural progress merely with adding isolated pairs. Keep original mutation settings available as an experimental baseline, and report which operators and probabilities changed.
 
+\section{Emergent Structural Attention}
+Partitioned sensory embedding may produce an implicit form of attention without introducing explicit attention weights or a new composition operator. Different receptor regions activate different pairs and therefore different structural continuations. Some continuations may converge on the same downstream pair or yield compatible actions and whole-signal expectations; others may terminate quickly or produce outputs with little behavioral consequence.
+
+The resulting \emph{effective influence} of a receptor region may depend on its access to consequential structures in the existing repertoire, rather than on a separately assigned importance score. This is a hypothesis to test, not an assumed property of the architecture. In particular, shared or duplicate outputs do not automatically reinforce one another: their influence depends on the existing continuation rules and the interface's action-conflict policy.
+
+The initial Agent X experiments should focus on this spatial, receptor-region form of structural attention in static environments. Record which regions activate which pairs, how far their continuations proceed, whether continuations converge, and which regions contribute to actions or successful expectations. Do not add an explicit attention mechanism or special chain-merging rules solely to force convergence.
+
+A related possibility is \emph{temporal structural attention}, in which structural relationships determine which earlier observations remain relevant to later processing. This is reserved for future work. Agent X does not presently require a temporal attention or memory mechanism.
+
 \section{Research Implications}
 Parallel activation allows several competing conjectures about the same next observation to coexist. This creates room for future counterfactual modeling, but parallel predictions alone do not constitute action-conditioned counterfactual reasoning. That would require explicit treatment of alternative conditions or actions and careful handling of unobserved alternatives.
 
