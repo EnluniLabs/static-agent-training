@@ -7,7 +7,7 @@ Spent work stays charged; an exhausted execution can resume with pooled budget.
 
 import argparse
 from dataclasses import dataclass, field
-import json
+from . import serialization as json
 from pathlib import Path
 import random
 

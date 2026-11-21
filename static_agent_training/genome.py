@@ -2,7 +2,7 @@
 
 from dataclasses import asdict, dataclass, replace
 import hashlib
-import json
+from . import serialization as json
 
 from .initialize import is_closed
 from .mappings import InheritedMappings

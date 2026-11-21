@@ -16,7 +16,7 @@ from .evolution import TrainingConfig
 from .experiment import write_json
 from .experimental.sensory_accelerated import evaluate_frozen as sensory_frozen
 from .genome import Species
-from .populations import read_population, validate_compatibility
+from .populations import read_population, validate_compatibility, sensory_apparatus
 from .seeds import derive
 
 
@@ -29,8 +29,9 @@ def validate_inputs(paths, environment):
         path = Path(path).resolve()
         data = read_population(path)
         source = data['config']
-        config = TrainingConfig(model=source.get('model','categorical'),receptors=source.get('receptors',256),
-            environment=environment,encoding_seed=source.get('encoding_seed',0),
+        config = TrainingConfig(model=source.get('model','categorical'),**sensory_apparatus(source),
+            environment=environment,embedding_selection=source.get('embedding_selection','sample'),
+            action_policy=source.get('action_policy','agreement'),encoding_seed=source.get('encoding_seed',0),
             varying_goals=source.get('varying_goals',False))
         # A frozen assessment cannot initialize new categorical vocabulary entries.
         validate_compatibility(data,config)
@@ -58,7 +59,7 @@ def run_assessment(paths, output, *, environment='original', episodes=200, seed=
     positions=spec.positions
     tasks=[]
     for _ in range(episodes):
-        goal=rng.choice(positions) if goals_vary else spec.center
+        goal=0 if spec.kind=='lights-out' else rng.choice(positions) if goals_vary else spec.center
         start=rng.choice([x for x in positions if x!=goal])
         tasks.append((start,goal))
     starts,goals=[s for s,g in tasks],[g for s,g in tasks]
@@ -68,7 +69,7 @@ def run_assessment(paths, output, *, environment='original', episodes=200, seed=
         learning=False,evolution=False,weights='saved inherited genotype exactly as stored; no adaptation or warmup',
         task_source='shared uniform tasks over the selected world; may overlap source training tasks',tasks=tasks,
         task_id=hashlib.sha256(json.dumps(tasks,separators=(',',':')).encode()).hexdigest(),
-        random_success=random_task_mean(starts,goals,boundary_mode=boundary_mode,**spec.world_kwargs),
+        random_success=random_task_mean(starts,goals,boundary_mode=boundary_mode,**spec.baseline_kwargs),
         progress=dict(completed_animals=0,total_animals=sum(len(data['members']) for _,data,_ in sources)),populations=[])
     def save():
         report['updated']=time.time()
@@ -89,10 +90,12 @@ def run_assessment(paths, output, *, environment='original', episodes=200, seed=
         for path,snapshot,data,cfg,digest in frozen:
             members=[Species.from_data(row['individual']) for row in data['members']]
             population=dict(name=data['name'],source=str(path),snapshot=str(snapshot),sha256=digest,
-                model=cfg.model,count=len(members),completed=0,individuals=[])
+                model=cfg.model,embedding_selection=cfg.embedding_selection if cfg.model=="senses" else None,count=len(members),completed=0,individuals=[],
+                **sensory_apparatus(data['config']),action_policy=cfg.action_policy)
             report['populations'].append(population)
             evaluator=sensory_frozen if cfg.model=='senses' else evaluate_frozen
-            kwargs=dict(goal_conditioned=cfg.varying_goals) if cfg.model=='senses' else {}
+            kwargs=dict(goal_conditioned=cfg.varying_goals,embedding_selection=cfg.embedding_selection,
+                        sensory_partitions=cfg.sensory_partitions,action_policy=cfg.action_policy) if cfg.model=='senses' else {}
             for first in range(0,len(members),64):
                 batch=members[first:first+64]
                 identities=[p.genotype_id for p in batch]
@@ -129,7 +132,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--populations',nargs='+',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True)
-    parser.add_argument('--environment',choices=('original','shifted'),default='original')
+    parser.add_argument('--environment',choices=('original','shifted','lights-out','switches-2x2','lights-out-2x2','switchboard'),default='original')
     parser.add_argument('--episodes',type=int,default=200)
     parser.add_argument('--seed',type=int,default=48)
     parser.add_argument('--workers',type=int,default=4)

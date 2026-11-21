@@ -1,6 +1,6 @@
 """Serve model/session management and frozen playback; retain legacy views."""
 import argparse
-import json
+from . import serialization as json
 import random
 import secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -15,7 +15,7 @@ from .agent import Agent, run_episode
 from .candidates import CandidateStore, attach_benchmark, load_saved_candidate
 from .environment import Output
 from .baseline import random_success
-from .demo import RecordingWorld
+from .demo import RecordingWorld, recording_world
 from .genome import Species
 from .seeds import derive
 from .status import ROOT, RUNS_PAGE, collect_runs
@@ -32,6 +32,7 @@ def attempt(bundle, start, goal, seed, policy="animal"):
     spec = environment_spec(bundle.get('environment','original'))
     if not (spec.lower <= start <= spec.upper and spec.lower <= goal <= spec.upper):
         raise ValueError(f'Start and goal must be between {spec.lower} and {spec.upper}')
+    if spec.kind=='lights-out' and goal!=0:raise ValueError('Lights Out goal is the all-off board (0)')
     if not 0 <= seed <= 2**32 - 1:
         raise ValueError('Seed must be between 0 and 4294967295')
     if bundle.get('model') == 'senses':
@@ -44,7 +45,7 @@ def attempt(bundle, start, goal, seed, policy="animal"):
         frames = [dict(position=start, actions=0, label='Already at goal', done=True,
                        success=True, reason='target', correct=0, tested=0)]
     elif policy == 'random':
-        world = RecordingWorld(encoding_seed=bundle['encoding_seed'], goal_conditioned=conditioned, boundary_mode="clamp", **spec.world_kwargs)
+        world = recording_world(bundle.get('environment','original'),encoding_seed=bundle['encoding_seed'],goal_conditioned=conditioned,boundary_mode='clamp')
         rng = random.Random(derive(seed, 'interactive', 'random'))
         moves = tuple(world.diagnostic_state()['move_decoding'])
         transition = world.reset(start=start, goal=goal)
@@ -59,7 +60,7 @@ def attempt(bundle, start, goal, seed, policy="animal"):
         agent = Agent(species.repertoire, mappings, learning=False,
                       embedding_seed=derive(seed, 'interactive', 'embedding'),
                       output_seed=derive(seed, 'interactive', 'output'))
-        world = RecordingWorld(encoding_seed=bundle['encoding_seed'], goal_conditioned=conditioned, boundary_mode="clamp", **spec.world_kwargs)
+        world = recording_world(bundle.get('environment','original'),encoding_seed=bundle['encoding_seed'],goal_conditioned=conditioned,boundary_mode='clamp')
         run_episode(agent, world, start=start, goal=goal, learn=False)
         frames = world.frames
         for frame in frames:
@@ -67,8 +68,8 @@ def attempt(bundle, start, goal, seed, policy="animal"):
                 position = int(frame['label'].split()[-1])
                 frame['label'] = f'Predict next position {position}'
     return dict(start=start, goal=goal, seed=seed, policy=policy, frames=frames,
-                lower=spec.lower, upper=spec.upper, boundary_mode="clamp",
-                random_expected_success=random_success(start,goal,boundary_mode="clamp", **spec.world_kwargs))
+                lower=spec.lower, upper=spec.upper, environment=bundle.get('environment','original'), boundary_mode="clamp",
+                random_expected_success=random_success(start,goal,boundary_mode="clamp", **spec.baseline_kwargs))
 
 
 PAGE = '''<!doctype html><html lang="en"><meta charset="utf-8">
@@ -220,7 +221,8 @@ def handler_for(bundle, *, status_root=ROOT):
                     return
                 try:
                     length = int(self.headers.get('Content-Length', '0'))
-                    if not 0 < length <= 16384:
+                    limit = 512 * 1024 if self.path == '/api/stream-preview' else 16384
+                    if not 0 < length <= limit:
                         raise ValueError('Invalid request size')
                     data = json.loads(self.rfile.read(length))
                     if not isinstance(data, dict):

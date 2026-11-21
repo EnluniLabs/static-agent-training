@@ -1,7 +1,7 @@
 """Read-only discovery and loading of each run's best saved training champion."""
 from collections import OrderedDict
 import gzip
-import json
+from . import serialization as json
 from .environments import environment_spec
 from pathlib import Path
 import threading
@@ -67,13 +67,15 @@ def load_saved_candidate(directory, generation=None):
     result = trace['result']
     episodes = result['assessment']['episodes']
     if config.get('model') == 'senses':
-        bundle = dict(schema_version='crt-sensory-candidate-v1', model='senses', generation=generation + 1,
+        bundle = dict(schema_version='crt-sensory-candidate-v1', model='senses',embedding_selection=trace['learned_model'].get('embedding_selection','sample'), generation=generation + 1,
                       training_success=result['training']['fitness'], assessment_success=result['assessment']['fitness'],
+                      sensory_partitions=trace['learned_model'].get('sensory_partitions',1),
+                      action_policy=trace['learned_model'].get('action_policy','agreement'),
                       individual=trace['individual'], learned_model=trace['learned_model'], assessment_seed=result['seed'],
                       environment=config.get('environment', 'original'), encoding_seed=config['encoding_seed'], varying_goals=config.get('varying_goals', True),
                       boundary_mode=config.get('boundary_mode', 'clamp'), episodes=episodes)
         bundle['random_assessment_success'] = random_task_mean(
-            [e['start'] for e in episodes], [e.get('goal', 0) for e in episodes], boundary_mode=bundle['boundary_mode'], **environment_spec(bundle.get('environment','original')).world_kwargs)
+            [e['start'] for e in episodes], [e.get('goal', 0) for e in episodes], boundary_mode=bundle['boundary_mode'], **environment_spec(bundle.get('environment','original')).baseline_kwargs)
         attach_benchmark(bundle, benchmark_path)
         return bundle
     bundle = dict(schema_version='crt-demo-v1', generation=generation+1,
@@ -85,7 +87,7 @@ def load_saved_candidate(directory, generation=None):
                   revised={e['pair']:i for i,e in enumerate(trace.get('training_events', [])) if e['kind']=='EMPIRICAL_UPDATE'},
                   varying_goals=config.get('varying_goals', False), boundary_mode=config.get('boundary_mode','terminate'), episodes=episodes)
     bundle['random_assessment_success'] = random_task_mean(
-        [e['start'] for e in episodes], [e.get('goal', 0) for e in episodes], boundary_mode=bundle['boundary_mode'], **environment_spec(bundle.get('environment','original')).world_kwargs)
+        [e['start'] for e in episodes], [e.get('goal', 0) for e in episodes], boundary_mode=bundle['boundary_mode'], **environment_spec(bundle.get('environment','original')).baseline_kwargs)
     attach_benchmark(bundle, benchmark_path)
     return bundle
 
@@ -109,7 +111,7 @@ class CandidateStore:
     def list(self):
         options = []
         for row in collect_runs(self.root):
-            if row.get('model') == 'senses':
+            if row.get('model') == 'senses' or row.get('environment') in ('lights-out','switches-2x2','lights-out-2x2','switchboard'):
                 continue
             best = best_saved(self.root / 'runs' / row['name'])
             options.append(dict(run_id=row['name'], name=row['name'], state=row['state'],

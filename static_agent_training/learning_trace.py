@@ -50,7 +50,7 @@ def build_traces():
         row[successor] = -2.0  # position + goal give a combined successor logit -4.
     maps.output[source]['expect_+6'] = .01
     old = Agent(rep,maps,learning_config=config)
-    model = BitModel(rep,senses=senses,learning_config=config)
+    model = BitModel(rep,senses=senses,learning_config=config,embedding_selection="sample")
     model.bias = [-4.0 if q==successor else 0.0 for q in ids]
     model.weights = [[0.0]*len(ids) for _ in range(model.spec.features)]
     model.gates = {q:[0.0]*10 for q in ids}

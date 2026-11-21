@@ -52,7 +52,8 @@ class FixedSensesTests(unittest.TestCase):
         self.assertEqual(model.parameters(), baseline)
         self.assertEqual(model.structure_hash(), structure)
         restored = BitModel.from_data(json.loads(json.dumps(model.to_data())))
-        self.assertEqual(restored.senses, senses)
+        self.assertEqual(restored.senses, model.senses)
+        self.assertEqual(restored.senses.partitions, model.sensory_partitions)
         self.assertEqual(restored.parameters(), baseline)
         with self.assertRaises(ValueError):
             run_episode(restored, SensoryAdapter(Symbols(), FixedSenses(128)), None)

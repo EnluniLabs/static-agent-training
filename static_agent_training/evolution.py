@@ -7,7 +7,7 @@ import hashlib
 import json
 import warnings
 
-from .environments import environment_spec
+from .environments import environment_spec, categorical_world
 from .environment import NumberLine, POSITIONS, sample_starts
 from .evaluation import evaluate
 from .baseline import random_task_mean
@@ -50,6 +50,12 @@ class TrainingConfig:
     learning_config: LearningConfig = field(default_factory=LearningConfig)
     model: str = 'categorical'
     receptors: int = 256
+    embedding_selection: str = "argmax"
+    sensory_partitions: int = 1
+    sensory_interface: str = 'legacy-bytes'
+    retina_width: int = 16
+    retina_height: int = 16
+    action_policy: str = "agreement"
     environment: str = "original"
     initial_population: str | None = None
     population_save_count: int = 10
@@ -61,8 +67,28 @@ class TrainingConfig:
             raise ValueError('initialization seed must be a nonnegative integer')
         if self.model not in ('categorical', 'senses'):
             raise ValueError('model must be categorical or senses')
+        if self.embedding_selection not in ("sample", "argmax"):
+            raise ValueError("embedding_selection must be sample or argmax")
         if type(self.receptors) is not int or self.receptors < 16 or self.receptors % 16:
             raise ValueError('receptors must be a positive multiple of 16')
+        if type(self.sensory_partitions) is not int or not 1 <= self.sensory_partitions <= self.receptors:
+            raise ValueError('sensory_partitions must be a positive integer no greater than receptors')
+        if self.sensory_interface not in ('legacy-bytes', 'retina', 'signals'):
+            raise ValueError('sensory_interface must be legacy-bytes, retina, or signals')
+        if any(type(v) is not int or v < 1 for v in (self.retina_width, self.retina_height)):
+            raise ValueError('receptor layout dimensions must be positive integers')
+        if self.sensory_interface in ('retina', 'signals'):
+            if self.model != 'senses':
+                raise ValueError('signal surfaces require a fixed-senses model')
+            if self.receptors != self.retina_width * self.retina_height:
+                raise ValueError('receptor resolution must equal layout width times height')
+        if self.action_policy not in ('agreement', 'vote'):
+            raise ValueError('action_policy must be agreement or vote')
+        if self.sensory_partitions > 1:
+            if self.model != 'senses':
+                raise ValueError('categorical models cannot use multiple sensory partitions')
+            if self.embedding_selection != 'argmax':
+                raise ValueError('multiple sensory partitions require argmax embedding selection')
         for name in ('population', 'generations', 'episodes', 'assessment_episodes',
                      'tournament_size', 'initial_pairs', 'workers', 'batch_size', 'population_save_count'):
             value = getattr(self, name)
@@ -100,6 +126,12 @@ class TrainingConfig:
             warnings.warn('CUDA support was removed; this saved configuration will use native CPU evaluation.',
                           RuntimeWarning, stacklevel=2)
             data['backend'] = 'native'
+        data.setdefault("sensory_interface", "legacy-bytes")
+        data.setdefault("retina_width", 16)
+        data.setdefault("retina_height", 16)
+        data.setdefault("sensory_partitions", 1)
+        data.setdefault("action_policy", "agreement")
+        data.setdefault("embedding_selection", "sample")
         data.setdefault("varying_goals", False)
         data.setdefault("distance_distribution", "uniform")
         data.setdefault("boundary_mode", "terminate")
@@ -112,9 +144,13 @@ class TrainingConfig:
 
 def partitions(seed, *, include_zero=False, environment="original"):
     spec = environment_spec(environment)
-    positions = list(spec.positions) if include_zero else [x for x in spec.positions if x != spec.center]
+    if spec.kind=='lights-out':
+        from .lights_out import solutions
+        positions=sorted(set(solutions(environment))-{0})
+    else:
+        positions = list(spec.positions) if include_zero else [x for x in spec.positions if x != spec.center]
     random.Random(derive(seed, 'partitions')).shuffle(positions)
-    count=len(positions)-10
+    count=len(positions)-(max(1,len(positions)//5) if spec.kind=='lights-out' else 10)
     return dict(training=sorted(positions[:count]), assessment=sorted(positions[count:]))
 
 
@@ -125,11 +161,13 @@ def initialize_population(config, progress=None):
     initialization_seed = config.seed if config.initialization_seed is None else config.initialization_seed
     senses = None
     if config.model == 'senses':
-        from .experimental.senses import FixedSenses
-        senses = FixedSenses(receptors=config.receptors)
+        from .experimental.apparatus import make_senses
+        senses = make_senses(receptors=config.receptors, sensory_partitions=config.sensory_partitions,
+                             sensory_interface=config.sensory_interface,
+                             retina_width=config.retina_width, retina_height=config.retina_height)
         observations, outputs = (), ()
     else:
-        vocabulary = NumberLine(encoding_seed=config.encoding_seed, goal_conditioned=config.varying_goals, **environment_spec(config.environment).world_kwargs)
+        vocabulary = categorical_world(config.environment,encoding_seed=config.encoding_seed,goal_conditioned=config.varying_goals)
         observations = [s.token for s in vocabulary.observation_tokens]
         outputs = [o.token for o in vocabulary.output_tokens]
     population = []
@@ -156,6 +194,11 @@ def structural_population_id(population):
 
 def generation_tasks(config, generation, split):
     spec = environment_spec(config.environment)
+    if spec.kind=='lights-out':
+        from .lights_out import sample_tasks as puzzle_tasks
+        training=puzzle_tasks(derive(config.seed,'training-tasks',generation),config.episodes,split['training'],config.environment)
+        assessment=puzzle_tasks(derive(config.seed,'assessment-tasks'),config.assessment_episodes,split['assessment'],config.environment)
+        return [s for s,g in training],[s for s,g in assessment],[0]*len(training),[0]*len(assessment)
     if config.distance_distribution == 'normal':
         tasks = []
         for phase, count, seed in (
@@ -196,8 +239,8 @@ def evaluate_generation(population, config, generation, split, progress=None, *,
         from .experimental.sensory_evolution import evaluate_generation as evaluate_sensory_generation
         return evaluate_sensory_generation(population, config, generation, split, progress, return_lifetime=return_lifetime)
     training_starts, assessment_starts, training_goals, assessment_goals = generation_tasks(config, generation, split)
-    random_training = random_task_mean(training_starts, training_goals, boundary_mode=config.boundary_mode, **environment_spec(config.environment).world_kwargs)
-    random_assessment = random_task_mean(assessment_starts, assessment_goals, boundary_mode=config.boundary_mode, **environment_spec(config.environment).world_kwargs)
+    random_training = random_task_mean(training_starts, training_goals, boundary_mode=config.boundary_mode, **environment_spec(config.environment).baseline_kwargs)
+    random_assessment = random_task_mean(assessment_starts, assessment_goals, boundary_mode=config.boundary_mode, **environment_spec(config.environment).baseline_kwargs)
     lifetime_population=[] if config.inherit_lifetime else None
     accelerated_results = None
     if config.backend != 'python':
@@ -267,6 +310,7 @@ def evaluate_generation(population, config, generation, split, progress=None, *,
                    champion_assessment=results[champion]['assessment']['fitness'],
                    unique_genotypes=len({r['genotype_id'] for r in results}),
                    mean_repertoire=sum(r['repertoire_size'] for r in results) / len(results),
+                   mean_unique_initial_pairs=sum(len(set(p.initial_pairs)) for p in population) / len(population),
                    expectations=sum(r['training']['expectations'] for r in results),
                    tested=sum(r['training']['tested'] for r in results),
                    conflicts=sum(r['training']['conflicts'] for r in results))
@@ -276,6 +320,8 @@ def evaluate_generation(population, config, generation, split, progress=None, *,
     summary['unique_structures'] = len({describe(p) for p in population})
     summary['task_id'] = hashlib.sha256(json.dumps([training_starts,assessment_starts,training_goals,assessment_goals],separators=(',',':')).encode()).hexdigest()
     summary['population_id'] = hashlib.sha256(json.dumps([r['genotype_id'] for r in results],separators=(',',':')).encode()).hexdigest()
+    from .structural_diagnostics import population_structure
+    summary.update(population_structure(population, champion))
     summary['structural_population_id'] = structural_population_id(population)
     sampling = dict(distribution=config.distance_distribution,
                     mean=config.distance_mean if config.distance_distribution == 'normal' else None,
@@ -285,6 +331,11 @@ def evaluate_generation(population, config, generation, split, progress=None, *,
     record = dict(task_sampling=sampling, summary=summary, training_starts=training_starts, assessment_starts=assessment_starts,
                   training_goals=training_goals, assessment_goals=assessment_goals,
                   individuals=results, champion_index=champion)
+    if environment_spec(config.environment).kind=='lights-out':
+        from .lights_out import solutions
+        record['task_sampling']=dict(distribution='uniform-solvable-boards',
+            training_solution_lengths=[len(solutions(config.environment)[s]) for s in record['training_starts']],
+            assessment_solution_lengths=[len(solutions(config.environment)[s]) for s in record['assessment_starts']])
     return (record,champion_detail,lifetime_population) if return_lifetime else (record,champion_detail)
 
 

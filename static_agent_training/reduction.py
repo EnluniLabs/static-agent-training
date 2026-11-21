@@ -6,42 +6,67 @@ import random
 from .initialize import is_closed, node_count
 
 
+def _map_variables(term, context, variable):
+    """Rebuild in postorder with binder context, without hashing ASTs."""
+    pending = [(term, context, False)]
+    values = []
+    while pending:
+        node, bound, visited = pending.pop()
+        tag = node[0]
+        if tag == 'var':
+            values.append(variable(node, bound))
+        elif visited:
+            if tag == 'abs':
+                values.append(('abs', values.pop()))
+            else:
+                right = values.pop()
+                left = values.pop()
+                values.append(('app', left, right))
+        else:
+            pending.append((node, bound, True))
+            if tag == 'abs':
+                pending.append((node[1], bound + 1, False))
+            else:
+                pending.append((node[2], bound, False))
+                pending.append((node[1], bound, False))
+    return values[0]
+
+
 def shift(term, amount, cutoff=0):
-    tag = term[0]
-    if tag == 'var':
-        return ('var', term[1] + amount if term[1] >= cutoff else term[1])
-    if tag == 'abs':
-        return ('abs', shift(term[1], amount, cutoff + 1))
-    return ('app', shift(term[1], amount, cutoff), shift(term[2], amount, cutoff))
+    return _map_variables(term, cutoff, lambda node, bound:
+                          ('var', node[1] + amount if node[1] >= bound else node[1]))
 
 
 def substitute(term, index, replacement, depth=0):
-    if term[0] == 'var':
-        return shift(replacement, depth) if term[1] == index + depth else term
-    if term[0] == 'abs':
-        return ('abs', substitute(term[1], index, replacement, depth + 1))
-    return ('app', substitute(term[1], index, replacement, depth),
-            substitute(term[2], index, replacement, depth))
+    return _map_variables(term, depth, lambda node, bound:
+                          shift(replacement, bound) if node[1] == index + bound else node)
 
 
 def redexes(term, path=()):
     """Enumerate all redexes, including those beneath abstractions."""
-    if term[0] == 'app' and term[1][0] == 'abs':
-        yield path
-    if term[0] != 'var':
-        for child in range(1, len(term)):
-            yield from redexes(term[child], path + (child,))
+    pending = [(term, path)]
+    while pending:
+        node, position = pending.pop()
+        if node[0] == 'app' and node[1][0] == 'abs':
+            yield position
+        if node[0] != 'var':
+            for child in range(len(node) - 1, 0, -1):
+                pending.append((node[child], position + (child,)))
 
 
 def contract(term, path):
-    if path:
-        child, *rest = path
-        parts = list(term)
-        parts[child] = contract(term[child], tuple(rest))
-        return tuple(parts)
+    ancestors = []
+    for child in path:
+        ancestors.append((term, child))
+        term = term[child]
     if term[0] != 'app' or term[1][0] != 'abs':
         raise ValueError('path does not select a beta redex')
-    return shift(substitute(term[1][1], 0, shift(term[2], 1)), -1)
+    term = shift(substitute(term[1][1], 0, shift(term[2], 1)), -1)
+    for parent, child in reversed(ancestors):
+        parts = list(parent)
+        parts[child] = term
+        term = tuple(parts)
+    return term
 
 
 @dataclass(frozen=True)

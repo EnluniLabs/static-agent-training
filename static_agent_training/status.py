@@ -72,7 +72,7 @@ def collect_runs(root=ROOT, *, processes=None, now=None):
                 remaining = max(0, seconds_per_generation*(config['generations']-completed)-min(since_last, seconds_per_generation))
             updated = records[-1].stat().st_mtime if records else config_path.stat().st_mtime
             rows.append(dict(name=directory.name, state=state, completed=completed,
-                             model=config.get('model', 'categorical'), receptors=config.get('receptors'),
+                             environment=config.get('environment','original'), model=config.get('model', 'categorical'), receptors=config.get('receptors'),
                              target=config['generations'], population=config['population'],
                              backend=config.get('backend', 'python'), learning=config.get('learning', True), inherit_lifetime=config.get('inherit_lifetime',False), speciation=config.get('speciation', False),
                              progress=min(1, completed/config['generations']), summary=latest,

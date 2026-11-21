@@ -56,6 +56,39 @@ class Action:
 
 
 @dataclass(frozen=True)
+class NoOp:
+    """An interface arbitration result; never a learned output symbol."""
+    pass
+
+
+@dataclass(frozen=True)
+class ActionResolution:
+    action: Action | NoOp
+    conflict: bool
+    counts: tuple
+
+
+def resolve_actions(actions, policy='agreement', *, action_count=9):
+    """Resolve a simultaneous batch without granting priority to region order.
+
+    Voting uses a unique plurality; a tie at the maximum produces a no-op.
+    """
+    from collections import Counter
+    if policy not in ('agreement', 'vote'):
+        raise ValueError('action policy must be agreement or vote')
+    actions = tuple(actions)
+    if not actions or any(not isinstance(a, Action) or type(a.index) is not int
+                          or not 0 <= a.index < action_count for a in actions):
+        raise ValueError('provide a nonempty batch of valid actions')
+    counts = Counter(a.index for a in actions)
+    winners = [a for a, count in sorted(counts.items()) if count == max(counts.values())]
+    winner = (next(iter(counts)) if len(counts) == 1 else
+              winners[0] if policy == 'vote' and len(winners) == 1 else None)
+    return ActionResolution(NoOp() if winner is None else Action(winner),
+                            len(counts) > 1, tuple(sorted(counts.items())))
+
+
+@dataclass(frozen=True)
 class Prediction:
     channel: int
     signal: bytes
@@ -74,4 +107,5 @@ class SignalEnvironment(Protocol):
     spec: SignalSpec
 
     def reset(self, task: object) -> Step: ...
-    def step(self, action: Action) -> Step: ...
+    def step(self, action: Action | NoOp) -> Step: ...
+    def step_batch(self, actions: tuple, policy: str) -> Step: ...

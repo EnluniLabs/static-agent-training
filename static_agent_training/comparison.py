@@ -18,6 +18,7 @@ from .evolution import TrainingConfig
 from .experiment import write_json, load_checkpoint
 from .run_records import read_summary
 from .seeds import derive
+from .structure_profiles import STRUCTURE_ARGUMENTS, add_structure_arguments, apply_structure_arguments
 
 
 ROOT=Path(__file__).resolve().parent.parent
@@ -105,11 +106,12 @@ def report_for(manifest, status):
                 starting_population_comparison=treatment=='starting-population',
                 primary_endpoint='success of the highest-training saved champion on fresh shared held-out tasks, with learned weights frozen',
                 boundary_mode=manifest['config'].get('boundary_mode','terminate'),
-                distance_distribution=manifest['config']['distance_distribution'],
-                distance_mean=manifest['config']['distance_mean'],distance_stddev=manifest['config']['distance_stddev'],
+                distance_distribution='uniform-solvable-boards' if manifest['config'].get('environment') in ('lights-out','switches-2x2','lights-out-2x2','switchboard') else manifest['config']['distance_distribution'],
+                distance_mean=None if manifest['config'].get('environment') in ('lights-out','switches-2x2','lights-out-2x2','switchboard') else manifest['config']['distance_mean'],
+                distance_stddev=None if manifest['config'].get('environment') in ('lights-out','switches-2x2','lights-out-2x2','switchboard') else manifest['config']['distance_stddev'],
                 speciation_threshold=manifest['config']['speciation_threshold'],max_species=manifest['config']['max_species'],
                 model_capacities=None if treatment != 'model' else dict(
-                    categorical_parameters_per_state=(82 if manifest['config'].get('varying_goals') else 41) + 50,
+                    categorical_parameters_per_state=(2*(16 if manifest['config'].get('environment') in ('switches-2x2','lights-out-2x2') else 512)+9+int(manifest['config'].get('varying_goals',False))) if manifest['config'].get('environment') in ('lights-out','switches-2x2','lights-out-2x2','switchboard') else (82 if manifest['config'].get('varying_goals') else 41)+50,
                     sensory_parameters_per_state=2 * manifest['config'].get('receptors', 256) + 12),
                 limitations=([
                     'Both arms run full evolutionary training with matched tasks and budgets; starting populations may differ.',
@@ -160,7 +162,7 @@ def _run_study(directory, config=None, *, seeds=(42,43,44), benchmark_episodes=2
         elif treatment=='inheritance':
             base=replace(base,learning=True,inherit_lifetime=False)
         elif treatment=='model':
-            base=replace(base,model='categorical')
+            base=replace(base,model='senses' if base.sensory_partitions > 1 or base.sensory_interface in ('retina','signals') else 'categorical')
         manifest=dict(schema_version='crt-treatment-comparison-v1',treatment=treatment,name=directory.name,created=time.time(),
                       config=asdict(base),seeds=list(seeds),benchmark_episodes=benchmark_episodes,champion_count=champion_count,arms=[])
         if treatment=='starting-population':
@@ -220,6 +222,8 @@ def _run_study(directory, config=None, *, seeds=(42,43,44), benchmark_episodes=2
                     model = ('senses' if arm['enabled'] else 'categorical') if treatment == 'model' else config.model
                     arm_config=replace(config,seed=seed,speciation=arm['speciation'],learning=arm.get('learning',config.learning),
                                        inherit_lifetime=arm.get('inherit_lifetime',config.inherit_lifetime),model=model,
+                                       sensory_partitions=config.sensory_partitions if model=='senses' else 1,
+                                       sensory_interface=config.sensory_interface if model=='senses' else 'legacy-bytes',
                                        backend=config.backend,initial_population=arm.get('initial_population'),
                                        initialization_seed=arm.get('initialization_seed'))
                     path=directory/(arm['run_name']+'-config.json')
@@ -323,9 +327,15 @@ def main():
     parser.add_argument('--no-learning',action='store_true')
     parser.add_argument('--inherit-lifetime',action=argparse.BooleanOptionalAction,default=False)
     parser.add_argument('--speciation',action=argparse.BooleanOptionalAction,default=False)
-    parser.add_argument('--environment',choices=('original','shifted'),default='original')
+    parser.add_argument('--environment',choices=('original','shifted','lights-out','switches-2x2','lights-out-2x2','switchboard'),default='original')
     parser.add_argument('--model',choices=('categorical','senses'),default='categorical')
-    parser.add_argument('--receptors',type=int,default=256)
+    parser.add_argument('--receptors',type=int,default=None)
+    parser.add_argument('--sensory-interface',choices=('legacy-bytes','retina','signals'),default='legacy-bytes')
+    parser.add_argument('--retina-width', '--receptor-width',type=int,default=16)
+    parser.add_argument('--retina-height', '--receptor-height',type=int,default=16)
+    parser.add_argument('--embedding-selection',choices=('sample','argmax'),default='argmax')
+    parser.add_argument('--sensory-partitions',type=int,default=1)
+    parser.add_argument('--action-policy',choices=('agreement','vote'),default='agreement')
     parser.add_argument('--runs-root',type=Path,help='directory for both training arms; defaults to project runs/')
     parser.add_argument('--resume',type=Path)
     parser.add_argument('--population',type=int,default=1024)
@@ -341,15 +351,22 @@ def main():
     parser.add_argument('--max-species',type=int,default=16)
     parser.add_argument('--distance-mean',type=float,default=10)
     parser.add_argument('--distance-stddev',type=float,default=5)
+    add_structure_arguments(parser)
     args=parser.parse_args()
+    if args.resume and any(getattr(args, name) is not None for name in STRUCTURE_ARGUMENTS):
+        parser.error('resume uses saved configuration; structural overrides are not allowed')
     directory=args.resume or args.output or ROOT/'runs'/'comparisons'/datetime.now().strftime(args.treatment+'-%Y%m%d-%H%M%S')
     config=TrainingConfig(population=args.population,generations=args.generations,episodes=args.episodes,
                           assessment_episodes=args.assessment_episodes,elites=min(5,args.population-1),
                           backend=args.backend,workers=args.workers,batch_size=args.batch_size,
                           speciation_threshold=args.speciation_threshold,max_species=args.max_species,
-                          distance_mean=args.distance_mean,distance_stddev=args.distance_stddev,receptors=args.receptors,model=args.model,environment=args.environment,encoding_seed=args.encoding_seed,varying_goals=not args.fixed_goal,
+                          distance_mean=args.distance_mean,distance_stddev=args.distance_stddev,receptors=(args.receptors if args.receptors is not None else args.retina_width*args.retina_height if args.sensory_interface in ('retina','signals') else 256),sensory_interface=args.sensory_interface,retina_width=args.retina_width,retina_height=args.retina_height,embedding_selection=args.embedding_selection,sensory_partitions=args.sensory_partitions,action_policy=args.action_policy,model=args.model,environment=args.environment,encoding_seed=args.encoding_seed,varying_goals=not args.fixed_goal,
                           learning=not args.no_learning,inherit_lifetime=args.inherit_lifetime,speciation=args.speciation,
                           population_save_count=args.population_save_count)
+    try:
+        config=apply_structure_arguments(config,args)
+    except ValueError as error:
+        parser.error(str(error))
     print(f'Comparison: {directory}',flush=True)
     try:
         from .diagnostics import diagnostics

@@ -4,14 +4,27 @@ from dataclasses import asdict, replace
 from datetime import datetime, timezone
 import gzip
 import hashlib
-import json
+from . import serialization as json
 from pathlib import Path
 import statistics
 
-from .environments import environment_spec
+from .environments import environment_spec, categorical_world
 from .genome import Species
 from .seeds import derive
 
+
+
+def sensory_apparatus(source):
+    """Historical sources are byte transducers with one partition by default."""
+    return dict(receptors=source.get('receptors',256),
+        sensory_partitions=source.get('sensory_partitions',1),
+        sensory_interface=source.get('sensory_interface','legacy-bytes'),
+        retina_width=source.get('retina_width',16),
+        retina_height=source.get('retina_height',16))
+
+
+def apparatus_arguments(config):
+    return {key:getattr(config,key,default) for key,default in sensory_apparatus({}).items()}
 
 def read_population(path):
     path = Path(path)
@@ -92,6 +105,9 @@ def list_populations(root):
         config = data['config']
         rows.append(dict(id=path.relative_to(Path(root)/'runs').as_posix(),name=data['name'],count=len(data['members']),
             model=config.get('model','categorical'),receptors=config.get('receptors',256),
+            sensory_interface=config.get('sensory_interface','legacy-bytes'),
+            retina_width=config.get('retina_width',16),retina_height=config.get('retina_height',16),
+            sensory_partitions=config.get('sensory_partitions',1),action_policy=config.get('action_policy','agreement'),
             environment=config.get('environment','original'),source_type=data['source_type']))
     return rows
 
@@ -105,8 +121,13 @@ def validate_compatibility(data, config, *, allow_new_environment=False):
     if source.get('varying_goals',False) != config.varying_goals:
         raise ValueError('Saved population and new session must use the same goal-input mode')
     if config.model == 'senses':
-        if source.get('receptors',256) != config.receptors:
-            raise ValueError('Saved population receptor count must match the new session')
+        saved, requested = sensory_apparatus(source), apparatus_arguments(config)
+        keys = ['receptors','sensory_partitions','sensory_interface']
+        if saved['sensory_interface'] in ('retina','signals') or requested['sensory_interface'] in ('retina','signals'):
+            keys += ['retina_width','retina_height']
+        for key in keys:
+            if saved[key] != requested[key]:
+                raise ValueError(f'Saved population {key} must match the new session')
     elif not allow_new_environment and source.get('environment','original') != config.environment:
         raise ValueError('Categorical populations have fixed vocabularies; choose their original environment')
 
@@ -116,11 +137,23 @@ def initialize_saved(config):
     data = read_population(config.initial_population)
     validate_compatibility(data,config,allow_new_environment=True)
     parents = [Species.from_data(row['individual']) for row in data['members']]
+    if config.model == 'senses':
+        for parent in parents:
+            senses = parent.inherited.senses
+            expected = apparatus_arguments(config)
+            actual_interface = getattr(senses,'interface','legacy-bytes')
+            if senses.receptors != expected['receptors'] or actual_interface != expected['sensory_interface']:
+                raise ValueError('Parent senses do not match the saved apparatus')
+            count = getattr(senses,'partitions',None)
+            if count is not None and count != expected['sensory_partitions']:
+                raise ValueError('Parent senses partitions do not match the saved apparatus')
+            if actual_interface in ('retina', 'signals') and (senses.width != expected['retina_width'] or senses.height != expected['retina_height']):
+                raise ValueError('Parent retina dimensions do not match the saved apparatus')
     if config.model == 'categorical':
         from .environment import NumberLine
         from .mappings import InheritedMappings
         spec = environment_spec(config.environment)
-        world = NumberLine(encoding_seed=config.encoding_seed, goal_conditioned=config.varying_goals, **spec.world_kwargs)
+        world = categorical_world(config.environment,encoding_seed=config.encoding_seed,goal_conditioned=config.varying_goals)
         observations = tuple(o.token for o in world.observation_tokens)
         outputs = tuple(o.token for o in world.output_tokens)
         adapted = []
@@ -172,15 +205,17 @@ def benchmark_populations(paths, output, *, environment='original', episodes=100
         task_source='common sampled training tasks followed by frozen held-out assessment; no evolutionary generations',
         weights='inherited-genotype',learning=True,partitions=split,
         training_starts=starts,training_goals=goals,assessment_starts=assess,assessment_goals=assess_goals,
-        random_assessment=random_task_mean(assess,assess_goals,**spec.world_kwargs),populations=[])
+        random_assessment=random_task_mean(assess,assess_goals,**spec.baseline_kwargs),populations=[])
     write_json(output/'report.json',report)
     for path,data in zip(paths,populations):
-        cfg = replace(config,model=data['config'].get('model','categorical'),receptors=data['config'].get('receptors',256),
-                      encoding_seed=data['config'].get('encoding_seed',0))
+        cfg = replace(config,model=data['config'].get('model','categorical'),**sensory_apparatus(data['config']),
+                      encoding_seed=data['config'].get('encoding_seed',0),embedding_selection=data['config'].get('embedding_selection','sample'),
+                      action_policy=data['config'].get('action_policy','agreement'))
         validate_compatibility(data,cfg)
         members = [Species.from_data(row['individual']) for row in data['members']]
         evaluator = sensory_batch if cfg.model=='senses' else evaluate_batch
-        kwargs = dict(goal_conditioned=config.varying_goals) if cfg.model=='senses' else {}
+        kwargs = dict(goal_conditioned=config.varying_goals,embedding_selection=cfg.embedding_selection,
+                      sensory_partitions=cfg.sensory_partitions,action_policy=cfg.action_policy) if cfg.model=='senses' else {}
         rows = []
         for first in range(0,len(members),64):
             batch = members[first:first+64]
@@ -188,7 +223,7 @@ def benchmark_populations(paths, output, *, environment='original', episodes=100
                 seeds=[derive(seed,'population-benchmark',i) for i in range(first,first+len(batch))],
                 encoding_seed=cfg.encoding_seed,environment=environment,backend=backend,workers=workers,**kwargs))
         row = dict(name=data['name'],source=str(Path(path).resolve()),sha256=hashlib.sha256(Path(path).read_bytes()).hexdigest(),
-            model=cfg.model,count=len(rows),training_mean=statistics.mean(r['training']['fitness'] for r in rows),
+            **sensory_apparatus(data['config']),model=cfg.model,embedding_selection=cfg.embedding_selection if cfg.model=='senses' else None,action_policy=cfg.action_policy,count=len(rows),training_mean=statistics.mean(r['training']['fitness'] for r in rows),
             assessment_mean=statistics.mean(r['assessment']['fitness'] for r in rows),individuals=rows)
         report['populations'].append(row)
         write_json(output/'report.json',report)
@@ -204,7 +239,7 @@ def main():
     save=commands.add_parser('save');save.add_argument('run',type=Path);save.add_argument('--output',type=Path,required=True)
     save.add_argument('--count',type=int,default=10);save.add_argument('--name')
     bench=commands.add_parser('benchmark');bench.add_argument('--populations',nargs='+',type=Path,required=True)
-    bench.add_argument('--output',type=Path,required=True);bench.add_argument('--environment',choices=('original','shifted'),default='original')
+    bench.add_argument('--output',type=Path,required=True);bench.add_argument('--environment',choices=('original','shifted','lights-out','switches-2x2','lights-out-2x2','switchboard'),default='original')
     bench.add_argument('--episodes',type=int,default=100);bench.add_argument('--assessment-episodes',type=int,default=200)
     bench.add_argument('--seed',type=int,default=48);bench.add_argument('--backend',choices=('native',),default='native')
     bench.add_argument('--workers',type=int,default=4)

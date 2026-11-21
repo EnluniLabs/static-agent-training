@@ -1,13 +1,14 @@
 """Export the best saved training champion and a standalone visual assessment replay."""
 import argparse
 import gzip
-import json
+from . import serialization as json
 from pathlib import Path
 
 from .environments import environment_spec
 from .agent import Agent, run_episode
 from .baseline import random_task_mean
 from .environment import NumberLine
+from .lights_out import LightsOutWorld, board_bits
 from .genome import Species
 from .seeds import derive
 
@@ -27,6 +28,7 @@ class RecordingWorld(NumberLine):
                                 success=transition.success, reason=transition.reason,
                                 correct=sum(f.correct for f in transition.feedback),
                                 tested=len(transition.feedback)))
+        if 'board' in state:self.frames[-1]['board']=state['board']
 
     def emit(self, output, *, source=None):
         state = self.diagnostic_state()
@@ -45,6 +47,31 @@ class RecordingWorld(NumberLine):
         transition = super().stop()
         self.record(transition, 'Chain ended')
         return transition
+
+
+class RecordingLightsOut(LightsOutWorld):
+    record = RecordingWorld.record
+
+    def reset(self, **kwargs):
+        transition=super().reset(**kwargs);self.frames=[];self.record(transition,'Start')
+        return transition
+
+    def emit(self, output, *, source=None):
+        if output.token in self._moves:
+            cell=self.cells[list(self._moves).index(output.token)]
+            label=f'Press row {cell//self.grid_size+1}, column {cell%self.grid_size+1}' if cell is not None else 'Idle'
+        else:
+            label='Predict board '+''.join(map(str,board_bits(self._expects[output.token],self.environment)))
+        transition=super().emit(output,source=source);self.record(transition,label)
+        return transition
+
+    def stop(self):
+        transition=super().stop();self.record(transition,'Chain ended');return transition
+
+
+def recording_world(environment='original', **kwargs):
+    spec=environment_spec(environment)
+    return RecordingLightsOut(environment=environment,**kwargs) if spec.kind=='lights-out' else RecordingWorld(**{**spec.world_kwargs,**kwargs})
 
 
 def export_demo(directory):
@@ -71,7 +98,7 @@ def export_demo(directory):
         for expected in trace['result']['assessment']['episodes']:
             frames = record_episode(model, expected['start'], expected['goal'],
                 encoding_seed=bundle['encoding_seed'], boundary_mode=bundle['boundary_mode'],
-                goal_conditioned=bundle['varying_goals'], **environment_spec(bundle.get('environment','original')).world_kwargs)
+                goal_conditioned=bundle['varying_goals'], environment=bundle.get('environment','original'), **environment_spec(bundle.get('environment','original')).world_kwargs)
             if (frames[-1]['success'], frames[-1]['reason']) != (expected['success'], expected['reason']):
                 raise ValueError('sensory assessment replay does not match saved result')
             episodes.append(dict(start=expected['start'], goal=expected['goal'], frames=frames))
@@ -91,7 +118,7 @@ def export_demo(directory):
     agent = Agent(species.repertoire, mappings, learning=False,
                   embedding_seed=derive(seed, 'assessment', 'embedding'),
                   output_seed=derive(seed, 'assessment', 'output'))
-    world = RecordingWorld(encoding_seed=config['encoding_seed'],
+    world = recording_world(config.get('environment','original'),encoding_seed=config['encoding_seed'],
                            goal_conditioned=config.get("varying_goals", False), boundary_mode=config.get("boundary_mode", "terminate"), **environment_spec(config.get("environment","original")).world_kwargs)
     episodes = []
     for start, expected in zip(record['assessment_starts'], trace['result']['assessment']['episodes']):
@@ -106,7 +133,7 @@ def export_demo(directory):
                   learned_output=trace['learned_output'], assessment_seed=seed,
                   environment=config.get('environment','original'), encoding_seed=config['encoding_seed'], varying_goals=config.get('varying_goals', False), boundary_mode=config.get('boundary_mode', 'terminate'), episodes=episodes)
     bundle['random_assessment_success'] = random_task_mean(
-        [e['start'] for e in episodes], [e.get('goal', 0) for e in episodes], boundary_mode=bundle['boundary_mode'], **environment_spec(bundle.get('environment','original')).world_kwargs)
+        [e['start'] for e in episodes], [e.get('goal', 0) for e in episodes], boundary_mode=bundle['boundary_mode'], **environment_spec(bundle.get('environment','original')).baseline_kwargs)
     destination = directory / 'demo'
     destination.mkdir(exist_ok=True)
     (destination / 'champion.json').write_text(json.dumps(bundle, separators=(',', ':')) + '\n')
@@ -122,7 +149,7 @@ HTML = '''<!doctype html>
 <style>
 body{font:17px system-ui;background:#101725;color:#e7edf7;max-width:1050px;margin:40px auto;padding:20px}h1{font-size:30px}p{color:#b8c5d8;line-height:1.6}button,select{font:inherit;padding:10px;margin:5px;background:#26364e;color:white;border:1px solid #7283a0;border-radius:8px}svg{width:100%;background:#182438;border-radius:15px;margin:20px 0}#status{font-size:22px;min-height:65px}input{width:100%}#detail{min-height:30px}.legend{color:#b8c5d8}
 </style>
-<h1>Training champion · number-line replay</h1><p id="summary"></p>
+<h1>Training champion · replay</h1><p id="summary"></p>
 <p>The animal must reach the goal within 12 moves. Blue is the animal; green is the target. Positions and decoded predictions are viewer diagnostics; the animal receives opaque symbols. Learned weights are frozen for these held-out attempts.</p>
 <label>Attempt <select id="episode"></select></label>
 <button id="play">Play</button><button id="step">Step</button><button id="restart">Restart</button>
@@ -138,9 +165,10 @@ body{font:17px system-ui;background:#101725;color:#e7edf7;max-width:1050px;margi
 const data=__DATA__, lower=data.environment==='shifted'?30:-20,upper=lower+40,xpos=n=>50+(n-lower)*22.5,$=id=>document.getElementById(id);let ep=0,frame=0,timer=null;
 $('summary').textContent=`Generation ${data.generation} · Training success ${(data.training_success*100).toFixed(0)}% · Held-out success ${(data.assessment_success*100).toFixed(0)}% (${data.episodes.length} attempts)`;
 data.episodes.forEach((e,i)=>{let o=document.createElement('option');o.value=i;o.textContent=`${i+1}: start ${e.start} — ${e.frames.at(-1).success?'solved':e.frames.at(-1).reason.replaceAll('_',' ')}`;$('episode').append(o)});
-for(let n=lower;n<=upper;n+=5){$('ticks').insertAdjacentHTML('beforeend',`<line x1="${xpos(n)}" y1="82" x2="${xpos(n)}" y2="100" stroke="#7283a0"/><text x="${xpos(n)}" y="133" text-anchor="middle" fill="#b8c5d8" font-size="18">${n}</text>`)}
+const puzzleSize=['switches-2x2','lights-out-2x2'].includes(data.environment)?2:3;
+if(['lights-out','switches-2x2','lights-out-2x2','switchboard'].includes(data.environment)){document.querySelector('svg>line').remove();['animal','target','position'].forEach(id=>$(id).style.display='none');for(let i=0;i<puzzleSize*puzzleSize;i++)$('ticks').insertAdjacentHTML('beforeend',`<rect id="light-${i}" x="${410+(i%puzzleSize)*60}" y="${10+Math.floor(i/puzzleSize)*50}" width="44" height="40" rx="6" fill="#26364e"/>`);}else for(let n=lower;n<=upper;n+=5){$('ticks').insertAdjacentHTML('beforeend',`<line x1="${xpos(n)}" y1="82" x2="${xpos(n)}" y2="100" stroke="#7283a0"/><text x="${xpos(n)}" y="133" text-anchor="middle" fill="#b8c5d8" font-size="18">${n}</text>`)}
 function pause(){clearInterval(timer);timer=null;$('play').textContent='Play'}
-function render(){const fs=data.episodes[ep].frames,f=fs[frame],goal=data.episodes[ep].goal||0,x=Math.max(25,Math.min(975,xpos(f.position)));$('target').setAttribute('cx',xpos(goal));$('animal').setAttribute('cx',x);$('position').setAttribute('x',x);$('position').textContent=f.position;$('status').textContent=f.done?(f.success?'Solved — target reached!':`Stopped — ${f.reason.replaceAll('_',' ')}`):f.label;$('detail').textContent=`Step ${frame}/${fs.length-1} · Moves ${f.actions}/12 · ${f.label}`+(f.tested?` · Predictions correct: ${f.correct}/${f.tested}`:'');$('scrub').max=fs.length-1;$('scrub').value=frame;if(f.done)pause()}
+function render(){const fs=data.episodes[ep].frames,f=fs[frame],goal=data.episodes[ep].goal||0,x=Math.max(25,Math.min(975,xpos(f.position)));if(['lights-out','switches-2x2','lights-out-2x2','switchboard'].includes(data.environment)){for(let i=0;i<puzzleSize*puzzleSize;i++)$('light-'+i).setAttribute('fill',((f.position>>i)&1)?'#ffc780':'#26364e');}$('target').setAttribute('cx',xpos(goal));$('animal').setAttribute('cx',x);$('position').setAttribute('x',x);$('position').textContent=f.position;$('status').textContent=f.done?(f.success?'Solved — target reached!':`Stopped — ${f.reason.replaceAll('_',' ')}`):f.label;$('detail').textContent=`Step ${frame}/${fs.length-1} · Moves ${f.actions}/12 · ${f.label}`+(f.tested?` · Predictions correct: ${f.correct}/${f.tested}`:'');$('scrub').max=fs.length-1;$('scrub').value=frame;if(f.done)pause()}
 function step(){if(frame<data.episodes[ep].frames.length-1)frame++;render()}
 $('play').onclick=()=>{if(timer){pause();return}if(frame===data.episodes[ep].frames.length-1)frame=0;timer=setInterval(step,Number($('speed').value));$('play').textContent='Pause';render()};
 $('step').onclick=()=>{pause();step()};$('restart').onclick=()=>{pause();frame=0;render()};$('episode').onchange=()=>{pause();ep=Number($('episode').value);frame=0;render()};$('scrub').oninput=()=>{pause();frame=Number($('scrub').value);render()};$('speed').onchange=()=>{if(timer){pause();$('play').click()}};render();

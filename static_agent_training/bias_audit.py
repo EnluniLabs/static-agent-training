@@ -51,7 +51,10 @@ def audit_checkpoint(source, *, sample=128, sample_seed=20261101, repeats=10, ba
     if state['schema_version'] != 'crt-training-v1':
         raise ValueError('unsupported checkpoint schema')
     config = TrainingConfig.from_data(state['config'])
+    if config.sensory_interface in ("retina", "signals"):
+        raise ValueError("Numeric goal-input ablations do not apply to local sensory inputs; a local-target ablation requires a separate protocol")
     spec = environment_spec(config.environment)
+    if spec.kind=='lights-out':raise ValueError('Goal-input ablations apply to number-line environments; Lights Out has a fixed all-off target')
     if not config.varying_goals:
         raise ValueError('goal-input audit requires a varying-goal run')
     generation = state['next_generation']

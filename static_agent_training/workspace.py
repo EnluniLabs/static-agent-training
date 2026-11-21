@@ -164,6 +164,9 @@ class Workspace:
         return path
 
     def post(self, route, data):
+        if route in ('/api/delete-session','/api/delete-population'):
+            from .workspace_storage import WorkspaceStorage
+            return WorkspaceStorage(self).delete('session' if route.endswith('session') else 'population',data.get('run') if route.endswith('session') else data.get('population'))
         if route == '/api/save-population':
             from .populations import save_population
             from datetime import datetime
@@ -183,6 +186,10 @@ class Workspace:
             result = self.sessions.resume_run(data.get('run'), data.get('generations'))
         elif route == '/api/reset-lifetime':
             return self.models.reset_lifetime(data)
+        elif route == '/api/stream-preview':
+            return self.models.stream_preview(data)
+        elif route == '/api/brain-scan':
+            return self.models.brain_scan(data)
         elif route == '/api/attempt':
             return self.models.attempt(data)
         else:

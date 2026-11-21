@@ -6,7 +6,7 @@ from types import MappingProxyType
 
 from ..seeds import derive
 from .bit_model import BitModel, validate_parameters
-from .senses import FixedSenses
+from .senses import FixedSenses, RetinaSenses
 
 
 def freeze(value):
@@ -28,7 +28,7 @@ def thaw(value):
 @dataclass(frozen=True)
 class SensoryMappings:
     pair_ids: tuple
-    senses: FixedSenses
+    senses: FixedSenses | RetinaSenses
     parameters: object
 
     def __post_init__(self):
@@ -60,11 +60,12 @@ class SensoryMappings:
     def to_parameters(self):
         return thaw(self.parameters)
 
-    def model(self, repertoire, *, seed=0, learning_config=None):
+    def model(self, repertoire, *, seed=0, learning_config=None, embedding_selection="argmax", sensory_partitions=None, action_policy="agreement"):
         if tuple(repertoire.pairs) != self.pair_ids:
             raise ValueError('sensory mappings and repertoire differ')
         return BitModel(repertoire, senses=self.senses, parameters=self.to_parameters(),
-                        seed=seed, learning_config=learning_config)
+                        seed=seed, learning_config=learning_config, embedding_selection=embedding_selection,
+                        sensory_partitions=sensory_partitions, action_policy=action_policy)
 
     def perturb(self, *, seed, scale):
         if not math.isfinite(scale) or scale < 0:

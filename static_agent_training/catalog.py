@@ -1,5 +1,5 @@
 """Read-only discovery of baseline, sensory and paired-comparison artifacts."""
-import json
+from . import serialization as json
 from pathlib import Path
 
 from .status import collect_runs

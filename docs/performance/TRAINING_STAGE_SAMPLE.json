@@ -1,0 +1,30 @@
+{
+  "source": "runs/ui-20261104-220724-Model_A_1-eb173e",
+  "snapshot_sha256": "b78e89b714d978ae3c07d051ec72ce3e458ccf9f177f61f67a134b947f020934",
+  "generation": 91,
+  "config": {
+    "environment": "original",
+    "model": "senses",
+    "workers": 8,
+    "population": 100,
+    "episodes": 100,
+    "assessment_episodes": 200,
+    "inherit_lifetime": false,
+    "speciation": false
+  },
+  "timings_seconds": {
+    "nested_pack": 0.17597969999769703,
+    "nested_native_phases": 0.12009255500743166,
+    "nested_champion_reference": 0.23871608404442668,
+    "evaluation": 0.8316490639699623,
+    "best_candidates": 0.26668545097345486,
+    "reproduction": 1.4368515880196355,
+    "generation_record_write": 0.16233623499283567,
+    "champion_trace_write": 0.1326078050187789,
+    "champion_index": 0.00023795798188075423,
+    "population_to_data": 0.18641808698885143,
+    "checkpoint_write": 2.2917580470093526,
+    "total_measured": 5.309363871987443
+  },
+  "checkpoint_bytes": 8239926
+}
