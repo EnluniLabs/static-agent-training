@@ -3,7 +3,7 @@ import random
 import json
 
 from ..environment import MOVES
-from .signals import Action, SignalSpec, Step
+from .signals import Action, NoOp, SignalSpec, Step
 from .senses import StimulusStep
 
 
@@ -40,10 +40,10 @@ class ByteNumberLine:
     def step(self, action):
         if self.done:
             raise RuntimeError('reset required')
-        if not isinstance(action, Action) or type(action.index) is not int or not 0 <= action.index < self.spec.actions:
+        if not isinstance(action, NoOp) and (not isinstance(action, Action) or type(action.index) is not int or not 0 <= action.index < self.spec.actions):
             raise ValueError('unknown action')
         self.actions += 1
-        self.position = max(self.lower, min(self.upper, self.position + self.moves[action.index]))
+        self.position = max(self.lower, min(self.upper, self.position + (0 if isinstance(action, NoOp) else self.moves[action.index])))
         success = self.position == self.goal
         self.done = success or self.actions >= self.action_limit
         return Step(self.frame(), self.done, success,
@@ -73,6 +73,39 @@ class StimulusNumberLine:
     def stimulus(self):
         return json.dumps([self.position, self.goal] if self.goal_conditioned else [self.position], separators=(',', ':')).encode('utf-8')
 
+    def receptor_stimulus(self):
+        """Toy local numeric sensor: sixteen fixed offsets, with no remote cues."""
+        return bytes(0 if not self.lower <= self.position + offset <= self.upper else
+                     255 if self.goal_conditioned and self.position + offset == self.goal else
+                     128 if offset == 0 else 64
+                     for offset in range(-8, 8))
+
+    def render_retina(self, senses):
+        """One unit per column, fixed egocentric camera; no remote goal cues.
+
+        Physical goals are always visible in range, regardless of the legacy
+        goal_conditioned flag. Glyph geometry depends only on camera dimensions.
+        """
+        width, height = senses.width, senses.height
+        pixels = bytearray(width * height // 8)
+        def draw(x, y):
+            if 0 <= x < width and 0 <= y < height:
+                i = y * width + x
+                pixels[i // 8] |= 1 << (7 - i % 8)
+        center, ground = width // 2, min(height - 1, height * 3 // 4)
+        for x in range(width):
+            draw(x, ground)
+            if self.position + x - center in (self.lower, self.upper):
+                for y in range(max(0, ground - 3), ground):
+                    draw(x, y)
+        draw(center, ground - 1)
+        draw(center, ground - 2)
+        target = center + self.goal - self.position
+        if 0 <= target < width:
+            draw(target, ground - 3)
+            draw(target, ground - 4)
+        return bytes(pixels)
+
     def reset(self, task):
         start, goal = task
         if any(type(v) is not int or not self.lower <= v <= self.upper for v in (start, goal)) or start == goal:
@@ -83,10 +116,10 @@ class StimulusNumberLine:
     def step(self, action):
         if self.done:
             raise RuntimeError('reset required')
-        if not isinstance(action, Action) or type(action.index) is not int or not 0 <= action.index < len(self.moves):
+        if not isinstance(action, NoOp) and (not isinstance(action, Action) or type(action.index) is not int or not 0 <= action.index < len(self.moves)):
             raise ValueError('unknown action')
         self.actions += 1
-        self.position += self.moves[action.index]
+        self.position += 0 if isinstance(action, NoOp) else self.moves[action.index]
         if self.boundary_mode == "clamp":
             self.position = max(self.lower, min(self.upper, self.position))
         elif not self.lower <= self.position <= self.upper:

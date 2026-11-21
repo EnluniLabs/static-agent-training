@@ -5,7 +5,7 @@ import hashlib
 import json
 import random
 
-from ..environments import environment_spec
+from ..environments import environment_spec, stimulus_world, categorical_world
 from ..baseline import random_task_mean
 from ..seeds import derive
 from ..speciation import describe
@@ -20,8 +20,7 @@ def fingerprint(value):
 
 
 def block(model, tasks, *, learn, encoding_seed, boundary_mode="clamp", goal_conditioned=True, environment="original"):
-    world = SensoryAdapter(StimulusNumberLine(encoding_seed=encoding_seed, boundary_mode=boundary_mode,
-                                                   goal_conditioned=goal_conditioned, **environment_spec(environment).world_kwargs), model.senses)
+    world = SensoryAdapter(stimulus_world(environment,encoding_seed=encoding_seed,boundary_mode=boundary_mode,goal_conditioned=goal_conditioned), model.senses)
     episodes, counts = [], Counter()
     for start, goal in tasks:
         offset = len(model.events)
@@ -32,7 +31,8 @@ def block(model, tasks, *, learn, encoding_seed, boundary_mode="clamp", goal_con
         updates = Counter(e['kind'] for e in events)
         counts.update(updates)
         episodes.append(dict(start=start, goal=goal, success=final.success, reason=final.reason,
-                             outputs=updates['ACTION'] + updates['EXPECTATION'], actions=updates['ACTION'],
+                             outputs=updates['ACTION_SIGNAL' if model.sensory_partitions > 1 else 'ACTION'] + updates['EXPECTATION'],
+                             actions=updates['BATCH_ACTION' if model.sensory_partitions > 1 else 'ACTION'],
                              expectations=updates['EXPECTATION'], tested=len(feedback),
                              correct=sum(e['correct'] for e in feedback),
                              loss_sum=sum(e['prediction_nll'] for e in feedback),
@@ -47,25 +47,30 @@ def block(model, tasks, *, learn, encoding_seed, boundary_mode="clamp", goal_con
                 expired=counts['EXPIRED'], empirical_updates=counts['EMPIRICAL_UPDATE'], conflicts=counts['CONFLICT'])
 
 
-def evaluate(individual, training_tasks, assessment_tasks, *, seed, config):
+def evaluate(individual, training_tasks, assessment_tasks, *, seed, config, sensory_partitions=None, action_policy=None):
+    sensory_partitions = config.sensory_partitions if sensory_partitions is None else sensory_partitions
+    action_policy = config.action_policy if action_policy is None else action_policy
     inherited = individual.inherited
     if not isinstance(inherited, SensoryMappings):
         raise ValueError('sensory training requires sensory inherited parameters')
-    model = inherited.model(individual.repertoire, seed=seed, learning_config=config.learning_config)
+    model = inherited.model(individual.repertoire, seed=seed, learning_config=config.learning_config, embedding_selection=config.embedding_selection,
+                        sensory_partitions=sensory_partitions, action_policy=action_policy)
     model.embedding_rng = random.Random(derive(seed, 'training', 'embedding'))
     model.output_rng = random.Random(derive(seed, 'training', 'output'))
     training = block(model, training_tasks, learn=config.learning, encoding_seed=config.encoding_seed,
                      boundary_mode=config.boundary_mode, goal_conditioned=config.varying_goals, environment=config.environment)
     learned = model.to_data()
     assessor = BitModel(individual.repertoire, senses=inherited.senses, parameters=model.parameters(),
-                        seed=seed, learning_config=config.learning_config)
+                        seed=seed, learning_config=config.learning_config, embedding_selection=config.embedding_selection,
+                        sensory_partitions=sensory_partitions, action_policy=action_policy)
     assessor.embedding_rng = random.Random(derive(seed, 'assessment', 'embedding'))
     assessor.output_rng = random.Random(derive(seed, 'assessment', 'output'))
     assessment = block(assessor, assessment_tasks, learn=False, encoding_seed=config.encoding_seed,
                      boundary_mode=config.boundary_mode, goal_conditioned=config.varying_goals, environment=config.environment)
     result = dict(genotype_id=individual.genotype_id, seed=seed, training=training, assessment=assessment,
                   repertoire_size=len(individual.repertoire.pairs), successor_count=len(individual.repertoire.successors),
-                  model='senses')
+                  model='senses', embedding_selection=config.embedding_selection,
+                  sensory_partitions=sensory_partitions, action_policy=action_policy)
     detail = dict(learned_model=learned, assessment_events=assessor.events)
     reproductive = replace(individual, inherited=SensoryMappings(inherited.pair_ids, inherited.senses,
                                                                  model.parameters())) if config.inherit_lifetime else None
@@ -90,7 +95,8 @@ def evaluate_generation(population, config, generation, split, progress=None, *,
                 seeds=[derive(config.seed, 'evaluation', generation, i) for i in range(first, first+len(batch))],
                 encoding_seed=config.encoding_seed, learning=config.learning, learning_config=config.learning_config,
                 backend=config.backend, workers=config.workers, boundary_mode=config.boundary_mode,
-                goal_conditioned=config.varying_goals, environment=config.environment, return_weights=config.inherit_lifetime)
+                goal_conditioned=config.varying_goals, environment=config.environment, embedding_selection=config.embedding_selection,
+                sensory_partitions=config.sensory_partitions, action_policy=config.action_policy, return_weights=config.inherit_lifetime)
             if config.inherit_lifetime:
                 rows, weights = evaluated
                 lifetime_population.extend(replace(p, inherited=learned_mappings(p, weights, i)) for i,p in enumerate(batch))
@@ -126,26 +132,34 @@ def evaluate_generation(population, config, generation, split, progress=None, *,
         results[champion] = reference
     tested = sum(r['training']['tested'] for r in results)
     scores = [r['training']['fitness'] for r in results]
-    summary = dict(generation=generation, model='senses', mean=sum(scores) / len(scores), best=max(scores),
+    summary = dict(generation=generation, sensory_partitions=config.sensory_partitions, action_policy=config.action_policy, model='senses', embedding_selection=config.embedding_selection, mean=sum(scores) / len(scores), best=max(scores),
                    assessment_mean=sum(r['assessment']['fitness'] for r in results) / len(results),
                    champion_assessment=results[champion]['assessment']['fitness'],
-                   random_training=random_task_mean(train_starts, train_goals, boundary_mode=config.boundary_mode, **environment_spec(config.environment).world_kwargs),
-                   random_assessment=random_task_mean(test_starts, test_goals, boundary_mode=config.boundary_mode, **environment_spec(config.environment).world_kwargs),
+                   random_training=random_task_mean(train_starts, train_goals, boundary_mode=config.boundary_mode, **environment_spec(config.environment).baseline_kwargs),
+                   random_assessment=random_task_mean(test_starts, test_goals, boundary_mode=config.boundary_mode, **environment_spec(config.environment).baseline_kwargs),
                    unique_genotypes=len({r['genotype_id'] for r in results}),
                    unique_structures=len({describe(p) for p in population}),
                    mean_repertoire=sum(r['repertoire_size'] for r in results) / len(results),
+                   mean_unique_initial_pairs=sum(len(set(p.initial_pairs)) for p in population) / len(population),
                    expectations=sum(r['training']['expectations'] for r in results), tested=tested,
                    conflicts=sum(r['training']['conflicts'] for r in results),
                    prediction_accuracy=sum(r['training']['correct'] for r in results) / tested if tested else None,
                    task_id=hashlib.sha256(json.dumps([train_starts, test_starts, train_goals, test_goals],separators=(',', ':')).encode()).hexdigest(),
                    population_id=hashlib.sha256(json.dumps([r['genotype_id'] for r in results],separators=(',', ':')).encode()).hexdigest())
+    from ..structural_diagnostics import population_structure
+    summary.update(population_structure(population, champion))
     summary['structural_population_id'] = structural_population_id(population)
     record = dict(summary=summary, individuals=results, champion_index=champion,
                   training_starts=train_starts, assessment_starts=test_starts,
                   training_goals=train_goals, assessment_goals=test_goals,
-                  task_sampling=dict(distribution=config.distance_distribution,
+                  task_sampling=dict(distribution='uniform-solvable-boards' if environment_spec(config.environment).kind=='lights-out' else config.distance_distribution,
                        training_distances=[abs(s-g) for s,g in training_tasks],
                        assessment_distances=[abs(s-g) for s,g in assessment_tasks]))
+    if environment_spec(config.environment).kind=='lights-out':
+        from ..lights_out import solutions
+        record['task_sampling']=dict(distribution='uniform-solvable-boards',
+            training_solution_lengths=[len(solutions(config.environment)[s]) for s in record['training_starts']],
+            assessment_solution_lengths=[len(solutions(config.environment)[s]) for s in record['assessment_starts']])
     return (record, champion_detail, lifetime_population) if return_lifetime else (record, champion_detail)
 
 
@@ -161,9 +175,8 @@ def benchmark(directory, bundle, tasks, *, seed):
     model.output_rng.seed(derive(seed, 'benchmark-animal-output'))
     spec = environment_spec(bundle.get('environment', 'original'))
     boundary = bundle.get('boundary_mode', 'clamp')
-    world = SensoryAdapter(StimulusNumberLine(encoding_seed=bundle['encoding_seed'], boundary_mode=boundary,
-                              goal_conditioned=bundle.get('varying_goals', True), **spec.world_kwargs), model.senses)
-    control = NumberLine(encoding_seed=bundle['encoding_seed'], goal_conditioned=True, boundary_mode=boundary, **spec.world_kwargs)
+    world = SensoryAdapter(stimulus_world(bundle.get('environment','original'),encoding_seed=bundle['encoding_seed'],boundary_mode=boundary,goal_conditioned=bundle.get('varying_goals',True)), model.senses)
+    control = categorical_world(bundle.get('environment','original'),encoding_seed=bundle['encoding_seed'],goal_conditioned=True,boundary_mode=boundary)
     moves = tuple(control.diagnostic_state()['move_decoding'])
     rng = random.Random(derive(seed, 'benchmark-random-moves'))
     before = model.parameters()
@@ -178,11 +191,11 @@ def benchmark(directory, bundle, tasks, *, seed):
                              animal_reason=final.reason, random_reason=transition.reason))
     if model.parameters() != before:
         raise AssertionError('frozen benchmark changed sensory parameters')
-    result = dict(schema_version='crt-benchmark-v1', model='senses', seed=seed, episodes=len(tasks),
+    result = dict(schema_version='crt-benchmark-v1', model='senses', embedding_selection=model.embedding_selection,seed=seed, episodes=len(tasks),
                   generation=bundle['generation'], genotype_id=Species.from_data(bundle['individual']).genotype_id,
-                  environment=bundle.get('environment','original'), boundary_mode=boundary, exact_random_success=random_task_mean([s for s,g in tasks], [g for s,g in tasks], boundary_mode=boundary, **spec.world_kwargs),
+                  environment=bundle.get('environment','original'), boundary_mode=boundary, exact_random_success=random_task_mean([s for s,g in tasks], [g for s,g in tasks], boundary_mode=boundary, **spec.baseline_kwargs),
                   outcomes=outcomes, task_source='fresh shared held-out draws; no benchmark learning',
-                  random_policy='uniform over all nine movement buttons, including zero; 12 moves')
+                  random_policy='uniform over nine puzzle buttons; 12 presses' if spec.kind=='lights-out' else 'uniform over all nine movement buttons, including zero; 12 moves')
     for name in ('animal', 'random'):
         successes = sum(row[name + '_success'] for row in outcomes)
         result[name] = dict(successes=successes, success_rate=successes / len(tasks), interval95=interval(successes, len(tasks)),

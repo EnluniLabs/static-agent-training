@@ -72,6 +72,20 @@ class ProjectCliTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             main(self.root, ['benchmark', 'latest-senses'])
 
+    def test_switchboard_comparison_routing_is_explicit(self):
+        with patch('static_agent_training.cli.execute') as execute:
+            main(self.root, ['switchboard-test', '--help'])
+            self.assertEqual(execute.call_args.args,
+                             ('static_agent_training.switchboard_benchmark', ['--help']))
+        self.assertFalse((self.root / 'runs').exists())
+
+    def test_stream_routing_is_explicit_and_help_does_not_read_data(self):
+        with patch('static_agent_training.cli.execute') as execute:
+            main(self.root, ['stream', '--help'])
+            self.assertEqual(execute.call_args.args,
+                             ('static_agent_training.stream_inspect', ['--help']))
+        self.assertFalse((self.root / 'runs').exists())
+
     def test_cleanup_preserves_runs_and_environment(self):
         cache = self.root / 'static_agent_training' / '__pycache__'
         cache.mkdir(parents=True)

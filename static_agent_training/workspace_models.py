@@ -11,7 +11,7 @@ from .agent import Agent, run_episode
 from .baseline import random_success
 from .candidates import CandidateStore, best_saved
 from .catalog import read_json
-from .demo import RecordingWorld
+from .demo import RecordingWorld, recording_world
 from .environment import MOVES
 from .environments import environment_spec
 from .experimental.bit_model import BitModel
@@ -60,6 +60,7 @@ class WorkspaceModels:
                 options.append(dict(id=f"candidate:{directory.name}:{generation}", model=model,
                                     label=f"Generation {generation} · training champion", stage='trained',
                                     training_success=row.get('training_success'), assessment_success=row.get('assessment_success'),
+                                    sensory_partitions=config.get('sensory_partitions',1),action_policy=config.get('action_policy','agreement'),
                                     environment=config.get('environment','original'), varying_goals=config.get('varying_goals', False), boundary_mode=config.get('boundary_mode', 'terminate')))
         if model == 'senses':
             for name in ('trained', 'prior-adapting', 'prior-frozen', 'fresh-adapting', 'initial'):
@@ -78,6 +79,16 @@ class WorkspaceModels:
                                         model=model, label=f"Seed {result.get('seed')} · animal {result.get('animal', 0) + 1} · {stage}",
                                         stage=stage, training_success=metrics.get('training', {}).get('success_rate') if stage == 'trained' else None,
                                         assessment_success=metrics.get('assessment', {}).get('success_rate') if stage == 'trained' else None))
+        if model == 'senses':
+            from .brain_scan import sensory_geometry
+            for option in options:
+                _, snapshot, _ = self.load(option['id'])
+                saved = BitModel.from_data(snapshot)
+                if saved.senses is not None:
+                    geometry = sensory_geometry(saved.senses, saved.sensory_partitions)
+                    option.update(sensory_geometry=geometry, sensory_interface=geometry['interface'],
+                                  retina_width=geometry['width'], retina_height=geometry['height'],
+                                  sensory_partitions=geometry['partitions'])
         return options
 
     def load(self, identifier):
@@ -118,6 +129,108 @@ class WorkspaceModels:
             raise ValueError('Choose a valid playground lifetime identifier')
         return key
 
+    def brain_scan(self, data):
+        from .brain_scan import mapping_graph
+        from .genome import Species
+        identifier = data.get('snapshot')
+        key = self.lifetime_key(data)
+        with self.lifetime_lock:
+            session = self.lifetimes.get(key)
+            if session is not None and session['snapshot'] == identifier:
+                model = session['model']
+                graph = (mapping_graph(model.repertoire, parameters=model.parameters(), sensory_partitions=model.sensory_partitions, senses=model.senses)
+                         if isinstance(model, BitModel) else
+                         mapping_graph(model.repertoire, mappings=model.mappings))
+                return dict(graph, source='Current playground lifetime', attempts=session['attempts'],
+                            sensory_partitions=getattr(model,'sensory_partitions',1),
+                            action_policy=getattr(model,'action_policy','agreement'))
+            kind, snapshot, _ = self.load(identifier)
+            if kind == 'senses':
+                model = BitModel.from_data(snapshot)
+                graph = mapping_graph(model.repertoire, parameters=model.parameters(), sensory_partitions=model.sensory_partitions, senses=model.senses)
+            elif kind == 'candidate':
+                species = Species.from_data(snapshot['individual'])
+                maps = species.inherited.lifetime()
+                maps.embedding = snapshot['learned_embedding']
+                maps.output = snapshot['learned_output']
+                graph = mapping_graph(species.repertoire, mappings=maps)
+            else:
+                graph = mapping_graph(Repertoire.from_data(snapshot['repertoire']),
+                                      mappings=InheritedMappings.from_data(snapshot['mappings']))
+            return dict(graph, source='Saved snapshot', attempts=0,
+                        sensory_partitions=snapshot.get('sensory_partitions',1) if kind=='senses' else 1,
+                        action_policy=snapshot.get('action_policy','agreement') if kind=='senses' else 'agreement')
+
+    def stream_preview(self, data):
+        """Run opaque bytes through an isolated, frozen copy of saved senses."""
+        import base64
+        import binascii
+        from .brain_scan import mapping_graph
+        from .experimental.stream_input import run_stream
+
+        encoded = data.get('base64_data')
+        if not isinstance(encoded, str):
+            raise ValueError('base64_data must be valid Base64')
+        if len(encoded) > 4 * ((256 * 1024 + 2) // 3):
+            raise ValueError('File exceeds the 256 KiB limit')
+        try:
+            payload = base64.b64decode(encoded, validate=True)
+        except (ValueError, binascii.Error) as error:
+            raise ValueError('base64_data must be valid Base64') from error
+        if len(payload) > 256 * 1024:
+            raise ValueError('File exceeds the 256 KiB limit')
+        limit, seed = data.get('max_frames', 16), data.get('seed', 42)
+        if type(limit) is not int or not 1 <= limit <= 1024:
+            raise ValueError('max_frames must be a positive integer no greater than 1024')
+        if type(seed) is not int or not 0 <= seed <= 2**32 - 1:
+            raise ValueError('seed must be between 0 and 4294967295')
+        key = self.lifetime_key(data)
+        with self.lifetime_lock:
+            session = self.lifetimes.get(key)
+            if session is not None and session['snapshot'] == data.get('snapshot'):
+                original = session['model']
+                if not isinstance(original, BitModel):
+                    raise ValueError('Universal stream preview requires a fixed senses model; categorical models require their saved symbols')
+                model = BitModel.from_data(original.to_data())
+                origin = 'Current playground lifetime'
+            else:
+                kind, snapshot, _ = self.load(data.get('snapshot'))
+                if kind != 'senses':
+                    raise ValueError('Universal stream preview requires a fixed senses model; categorical models require their saved symbols')
+                model = BitModel.from_data(BitModel.from_data(snapshot).to_data())
+                origin = 'Saved snapshot'
+        if model.senses is None:
+            raise ValueError('This model has no saved fixed senses')
+        from .brain_scan import sensory_geometry
+        geometry = sensory_geometry(model.senses, model.sensory_partitions)
+        for field, saved in (('receptors', geometry['resolution']), ('resolution', geometry['resolution']),
+                             ('partitions', geometry['partitions']), ('sensory_partitions', geometry['partitions']),
+                             ('width', geometry['width']), ('height', geometry['height']),
+                             ('retina_width', geometry['width']), ('retina_height', geometry['height']),
+                             ('sensory_interface', geometry['interface'])):
+            if field in data and data[field] != saved:
+                raise ValueError(f'{field} conflicts with saved sensory geometry')
+        model.events.clear()
+        model.embedding_rng.seed(derive(seed, 'stream-preview', 'embedding'))
+        model.output_rng.seed(derive(seed, 'stream-preview', 'output'))
+        graph = mapping_graph(model.repertoire, parameters=model.parameters(),
+                              sensory_partitions=model.sensory_partitions, senses=model.senses)
+        preview = run_stream(model, payload, window_bytes=data.get('window_bytes'),
+                             frame_limit=limit, learn=False)
+        return dict(preview, source='Frozen stream copy', origin=origin, graph=graph,
+                    geometry_policy='Saved model sensory geometry; arbitrary byte source',
+                    sensory_partitions=model.sensory_partitions, action_policy=model.action_policy,
+                    sensory_geometry=graph['sensory_geometry'],
+                    partition_rectangles=getattr(model.senses, 'partition_rectangles', None),
+                    regions=(model.senses.partition_indices(model.sensory_partitions)
+                             if hasattr(model.senses, 'partition_indices') else
+                             model.senses.regions(model.sensory_partitions)),
+                    metadata=dict(bytes=len(payload), bytes_consumed=preview['bytes_consumed'],
+                                  window_bytes=(getattr(model.senses, 'raw_window_bytes', model.senses.receptors // 16) if data.get('window_bytes') is None
+                                                else data['window_bytes']),
+                                  windows=preview['frame_count'], embedded_frames=len(preview['frames']),
+                                  stop_reason=preview['stop_reason'], seed=seed))
+
     def reset_lifetime(self, data):
         key = self.lifetime_key(data)
         with self.lifetime_lock:
@@ -125,6 +238,8 @@ class WorkspaceModels:
         return dict(reset=True)
 
     def lifetime_attempt(self, data, kind, snapshot, lower, upper):
+        environment=data.get('world',snapshot.get('playback_world',snapshot).get('environment','original'))
+        puzzle=environment_spec(environment).kind=='lights-out'
         """Keep mutable model copies in memory; never write a saved candidate."""
         key = self.lifetime_key(data)
         identifier = data['snapshot']
@@ -160,7 +275,7 @@ class WorkspaceModels:
         model, config = session['model'], session['config']
         start, goal, seed = (data[k] for k in ('start','goal','seed'))
         conditioned = config.get('varying_goals', True)
-        if not conditioned and goal != environment_spec(config.get('environment','original')).center:
+        if (puzzle and goal!=0) or (not puzzle and not conditioned and goal != environment_spec(config.get('environment','original')).center):
             raise ValueError('This saved animal has no goal input; choose goal zero')
         learn = data.get('learning', False)
         offset = len(model.events)
@@ -170,12 +285,12 @@ class WorkspaceModels:
             model.output_rng.seed(derive(seed, 'interactive', 'output'))
             boundary = config.get('boundary_mode', 'clamp')
             frames = record_episode(model, start, goal, encoding_seed=config.get('encoding_seed', 0),
-                boundary_mode=boundary, goal_conditioned=conditioned, lower=lower, upper=upper, learn=learn)
+                boundary_mode=boundary, goal_conditioned=conditioned, lower=lower, upper=upper, learn=learn,environment=environment)
         else:
             model._embedding_rng.seed(derive(seed, 'interactive', 'embedding'))
             model._output_rng.seed(derive(seed, 'interactive', 'output'))
             boundary = 'clamp'
-            world = RecordingWorld(encoding_seed=config.get('encoding_seed', 0), goal_conditioned=conditioned,
+            world = recording_world(environment,encoding_seed=config.get('encoding_seed', 0), goal_conditioned=conditioned,
                                    boundary_mode=boundary, lower=lower, upper=upper)
             if start == goal:
                 frames = [dict(position=start,actions=0,label='Already at goal',done=True,success=True,
@@ -188,8 +303,12 @@ class WorkspaceModels:
         session['empirical_updates'] += counts['EMPIRICAL_UPDATE']
         session['conflicts'] += counts['CONFLICT']
         return dict(start=start, goal=goal, seed=seed, policy='animal', model='senses' if kind=='senses' else 'baseline',
-            frames=frames, lower=lower, upper=upper, boundary_mode=boundary,
-            random_expected_success=random_success(start,goal,boundary_mode=boundary,lower=lower,upper=upper),
+            frames=frames, lower=lower, upper=upper, environment=environment,boundary_mode=boundary,
+            sensory_partitions=getattr(model,'sensory_partitions',1),action_policy=getattr(model,'action_policy','agreement'),
+            sensory_interface=getattr(getattr(model, 'senses', None), 'interface', 'legacy-bytes'),
+            retina_width=getattr(getattr(model, 'senses', None), 'width', None),
+            retina_height=getattr(getattr(model, 'senses', None), 'height', None),
+            random_expected_success=random_success(start,goal,boundary_mode=boundary,**({'environment':environment} if puzzle else dict(lower=lower,upper=upper))),
             learning=dict(enabled=learn, attempts=session['attempts'], empirical_updates=counts['EMPIRICAL_UPDATE'],
                           structural_corrections=counts['CONFLICT'], total_empirical_updates=session['empirical_updates'],
                           total_structural_corrections=session['conflicts']))
@@ -204,12 +323,13 @@ class WorkspaceModels:
         saved_environment = snapshot.get('playback_world',snapshot).get('environment','original')
         world_name = data.get('world', saved_environment)
         policy = data.get('policy', 'animal')
-        if world_name not in ('original', 'shifted', 'expanded') or policy not in ('animal', 'random'):
+        if world_name not in ('original', 'shifted', 'expanded','switchboard','lights-out','switches-2x2','lights-out-2x2') or policy not in ('animal', 'random'):
             raise ValueError('Unknown world or policy')
         spec = environment_spec(world_name if world_name != 'expanded' else 'original')
         lower, upper = (-30, 30) if world_name == 'expanded' else (spec.lower, spec.upper)
         if not lower <= start <= upper or not lower <= goal <= upper:
             raise ValueError('Start and goal must be inside the selected world')
+        if spec.kind=='lights-out' and goal!=0:raise ValueError('Lights Out goal must be 0')
         if kind != 'senses' and world_name != saved_environment:
             raise ValueError('The categorical model requires its saved training environment')
         key = data.get('lifetime_id')
@@ -226,7 +346,7 @@ class WorkspaceModels:
             agent = Agent(Repertoire.from_data(snapshot['repertoire']), maps.lifetime(), learning=False,
                           embedding_seed=derive(seed, 'interactive', 'embedding'),
                           output_seed=derive(seed, 'interactive', 'output'))
-            world = RecordingWorld(goal_conditioned=True, lower=lower, upper=upper)
+            world = recording_world(world_name,goal_conditioned=True,lower=lower,upper=upper)
             if start == goal:
                 frames = [dict(position=start, actions=0, label='Already at goal', done=True, success=True,
                                reason='target', correct=0, tested=0)]
@@ -244,8 +364,9 @@ class WorkspaceModels:
         else:
             from .experimental.sensory_playback import attempt as sensory_attempt
             bundle = dict(learned_model=snapshot, **snapshot.get('playback_world', {}))
+            bundle['environment']=world_name if world_name!='expanded' else 'original'
             result = sensory_attempt(bundle, start, goal, seed, policy, lower=lower, upper=upper)
             return result
         return dict(start=start, goal=goal, seed=seed, policy=policy, model=kind, frames=frames,
-                    lower=lower, upper=upper, boundary_mode='clamp',
-                    random_expected_success=random_success(start, goal, lower=lower, upper=upper))
+                    lower=lower, upper=upper,environment=world_name, boundary_mode='clamp',
+                    random_expected_success=random_success(start,goal,**({'environment':world_name} if spec.kind=='lights-out' else dict(lower=lower,upper=upper))))

@@ -121,13 +121,8 @@ class NumberLine:
             return Transition(None)
 
         self._actions += 1
-        self._position += self._moves[token]
         self._internal = 0
-        if self.boundary_mode == "clamp":
-            self._position = max(self.lower, min(self.upper, self._position))
-        if self._position not in self.positions:
-            # No input symbol exists outside the world. Commitments expire
-            # without an observation against which to score them.
+        if not self._advance(self._moves[token]):
             return self._end("out_of_bounds")
         observed = self._signals[self._position]
         feedback = tuple(Feedback(i, source, self._signals[x], observed, x == self._position)
@@ -137,6 +132,12 @@ class NumberLine:
         self._done = success or self._actions >= self.action_limit
         reason = "target" if success else "action_limit" if self._done else None
         return Transition(self._observation(), feedback, done=self._done, success=success, reason=reason)
+
+    def _advance(self, move):
+        self._position += move
+        if self.boundary_mode == 'clamp':
+            self._position = max(self.lower,min(self.upper,self._position))
+        return self._position in self.positions
 
     def diagnostic_state(self):
         """Privileged runner/viewer data; do not pass this to the agent."""

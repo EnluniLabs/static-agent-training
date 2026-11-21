@@ -12,7 +12,7 @@ import random
 import subprocess
 import tempfile
 
-from .environments import environment_spec
+from .environments import environment_spec, categorical_world
 from .environment import NumberLine
 from .seeds import derive
 
@@ -30,9 +30,10 @@ def _numpy():
 
 
 @lru_cache(maxsize=16)
-def _cpu_kernel(capacity):
+def _cpu_kernel(capacity, environment="original"):
     source = SOURCE.read_bytes()
-    key = hashlib.sha256(source + str(capacity).encode()).hexdigest()[:24]
+    puzzle = environment_spec(environment).kind=='lights-out'
+    key = hashlib.sha256(source + str(capacity).encode()+str((puzzle,len(environment_spec(environment).positions))).encode()).hexdigest()[:24]
     directory = Path.home() / '.cache' / 'static-agent-training'
     directory.mkdir(parents=True, exist_ok=True)
     library = directory / f'evaluate-{key}.so'
@@ -41,7 +42,7 @@ def _cpu_kernel(capacity):
             target = Path(tmp) / 'evaluate.so'
             try:
                 subprocess.run(['g++', '-O3', '-std=c++17', '-shared', '-fPIC', '-fopenmp',
-                                '-ffp-contract=off', f'-DMAX_Q={capacity}', str(SOURCE), '-o', str(target)],
+                                '-ffp-contract=off', f'-DMAX_Q={capacity}', *(['-DLIGHTS_OUT',f'-DPUZZLE_STATES={len(environment_spec(environment).positions)}'] if puzzle else []), str(SOURCE), '-o', str(target)],
                                check=True, capture_output=True, text=True)
             except (OSError, subprocess.CalledProcessError) as error:
                 raise ValueError(f'Native evaluator compilation failed: {getattr(error, "stderr", str(error))}') from error
@@ -64,16 +65,16 @@ def _pack(population, encoding_seed, environment="original"):
     spec = environment_spec(environment)
     np = _numpy()
     conditioned = any(s.startswith('goal_') for s in population[0].inherited.observations)
-    world = NumberLine(encoding_seed=encoding_seed, goal_conditioned=conditioned, **spec.world_kwargs)
+    world = categorical_world(environment,encoding_seed=encoding_seed,goal_conditioned=conditioned)
     observations = tuple(s.token for s in world.observation_tokens)
     outputs = tuple(s.token for s in world.output_tokens)
     size = len(population)
     capacity = 1 << max(0, max(len(p.repertoire.pairs) for p in population)-1).bit_length()
     if capacity > 4096:
         raise ValueError('Accelerated evaluator supports at most 4096 pairs per animal')
-    _check_allocation(size * capacity * ((len(observations) + 50) * 8 + 4))
+    _check_allocation(size * capacity * ((len(observations) + len(outputs)) * 8 + 4))
     embedding = np.zeros((size, len(observations), capacity), dtype=np.float64)
-    output = np.zeros((size, capacity, 50), dtype=np.float64)
+    output = np.zeros((size, capacity, len(outputs)), dtype=np.float64)
     edges = np.full((size, capacity), -1, dtype=np.int32)
     sizes = np.zeros(size, dtype=np.int32)
     for index, individual in enumerate(population):
@@ -121,7 +122,7 @@ def _phase(arrays, seeds, starts, goals, *, phase, learning, learning_config, ba
              np.float64(learning_config.embedding_rate), np.float64(learning_config.compatibility_threshold)]
     if backend == 'native':
         pointers = [ctypes.c_void_p(a.ctypes.data) for a in inputs]
-        _cpu_kernel(capacity)(*[int(x) for x in scalar_args], *pointers, *rates,
+        _cpu_kernel(capacity,environment)(*[int(x) for x in scalar_args], *pointers, *rates,
                               ctypes.c_void_p(metrics.ctypes.data), ctypes.c_void_p(revised.ctypes.data), workers)
     else:
         raise ValueError('backend must be native')
@@ -168,6 +169,7 @@ def evaluate_batch(population, training_starts, assessment_starts, *, seeds, enc
         if len(starts) != len(goals) or any(type(s) is not int or type(g) is not int or
                 not spec.lower <= s <= spec.upper or not spec.lower <= g <= spec.upper or s == g for s, g in zip(starts, goals)):
             raise ValueError('require matching valid starts and goals that differ')
+        if spec.kind=='lights-out' and any(g!=0 for g in goals):raise ValueError('Lights Out goal must be 0')
     arrays = _pack(population, encoding_seed, environment)
     if all(x == -1 for x in arrays[5]) and any(g != spec.center for g in [*training_goals, *assessment_goals]):
         raise ValueError('nonzero goals require a goal-conditioned animal')
@@ -219,6 +221,7 @@ def evaluate_frozen(population, starts, goals, *, seeds, encoding_seed=0, backen
         raise ValueError('require nonempty matching populations, seeds, and tasks')
     if any(type(s) is not int or type(g) is not int or not spec.lower<=s<=spec.upper or not spec.lower<=g<=spec.upper or s==g for s,g in zip(starts,goals)):
         raise ValueError('invalid frozen assessment tasks')
+    if spec.kind=='lights-out' and any(g!=0 for g in goals):raise ValueError('Lights Out goal must be 0')
     if boundary_mode not in ('clamp','terminate') or type(workers) is not int or workers<1:
         raise ValueError('invalid boundary mode or worker count')
     arrays=_pack(population,encoding_seed,environment)

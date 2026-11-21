@@ -1,6 +1,7 @@
 """Validated local session launching; process control is limited to owned jobs."""
 from datetime import datetime
 import os
+import math
 from pathlib import Path
 import re
 import signal
@@ -12,6 +13,7 @@ import uuid
 
 from .catalog import read_json
 from .experiment import write_json
+from .structure_profiles import STRUCTURE_PRESETS
 
 
 KINDS = {
@@ -28,6 +30,34 @@ KINDS = {
 
 TRAINING = ('training', 'sensory-training')
 COMPARISONS = ('comparison', 'model-comparison', 'starting-population-benchmark')
+
+
+STRUCTURE_INTEGERS = ('initial_pairs', 'chain_budget', 'seed_term_max_nodes',
+    'seed_term_max_depth', 'development_max_nodes', 'development_max_transitions', 'new_pair_budget')
+STRUCTURE_PROBABILITIES = ('combinator_probability', 'subtree_probability',
+    'term_probability', 'insertion_probability', 'deletion_probability')
+STRUCTURE_KEYS = set(STRUCTURE_PRESETS['baseline']) | {'structure_preset'}
+
+
+def structure_arguments(config):
+    # The backend resolves scientific presets. Absent settings stay absent.
+    args = []
+    if 'structure_preset' in config:
+        preset = config['structure_preset']
+        if not isinstance(preset, str) or preset not in STRUCTURE_PRESETS:
+            raise ValueError('Unknown structure preset')
+        args += ['--structure-preset', preset]
+    for key in STRUCTURE_INTEGERS:
+        if key in config:
+            minimum = 0 if key in ('chain_budget', 'new_pair_budget') else 2 if key in ('seed_term_max_nodes', 'seed_term_max_depth') else 1
+            args += ['--' + key.replace('_', '-'), str(integer(config, key, None, minimum, 2**31 - 1))]
+    for key in STRUCTURE_PROBABILITIES:
+        if key in config:
+            value = config[key]
+            if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1:
+                raise ValueError(f'{key} must be a finite number between 0 and 1')
+            args += ['--' + key.replace('_', '-'), str(value)]
+    return args
 
 
 def integer(config, key, default, low=1, high=1_000_000):
@@ -148,21 +178,39 @@ class SessionManager:
                 *[str(self.population_path(value)) for value in selected],'--environment',environment,'--backend',backend,
                 '--episodes',str(integer(config,'episodes',100)),'--assessment-episodes',str(integer(config,'assessment_episodes',200)),
                 '--seed',str(integer(config,'seed',48,0,2**32-1)),'--workers',str(integer(config,'workers',4,1,1024))]
+        config = dict(config)
+        if kind in ('sensory-training','starting-population-benchmark'):
+            from .populations import read_population, sensory_apparatus
+            keys = ('initial_population',) if kind == 'sensory-training' else ('population_a','population_b')
+            for key in keys:
+                if not config.get(key):
+                    continue
+                saved = read_population(self.population_path(config[key]))
+                if saved['config'].get('model','categorical') != 'senses':
+                    continue
+                for name,value in sensory_apparatus(saved['config']).items():
+                    if name in config and config[name] != value:
+                        raise ValueError(f'Saved population {name} conflicts with manual override')
+                    config[name] = value
         allowed = {'episodes', 'assessment_episodes', 'seed', 'notes'}
         if kind in (*TRAINING, *COMPARISONS, 'interfaces'):
             allowed |= {'population', 'memory_limit_mb'}
         if kind in (*TRAINING, *COMPARISONS):
-            allowed |= {'generations', 'backend', 'workers', 'batch_size', 'environment'}
+            allowed |= {'generations', 'backend', 'workers', 'batch_size', 'environment'} | STRUCTURE_KEYS
         if kind in (*TRAINING,'starting-population-benchmark'):
             allowed |= {'learning', 'inherit_lifetime', 'speciation', 'champion_count', 'initial_population', 'population_save_count'}
         if kind in ('senses', 'sensory-training', 'model-comparison'):
-            allowed |= {'receptors'}
+            allowed |= {'receptors', 'embedding_selection'}
+        if kind in ('senses', 'sensory-training', *COMPARISONS):
+            allowed |= {'sensory_partitions', 'action_policy'}
+        if kind in ('sensory-training', *COMPARISONS):
+            allowed |= {'sensory_interface','retina_width','retina_height'}
         if kind == 'senses':
-            allowed |= {'receptors', 'candidate'}
+            allowed |= {'receptors', 'candidate', 'embedding_selection'}
         if kind == 'interfaces':
-            allowed |= {'receptors', 'seeds'}
+            allowed |= {'receptors', 'seeds', 'embedding_selection'}
         if kind in COMPARISONS:
-            allowed |= {'seeds', 'treatment', 'benchmark_episodes', 'model', 'receptors'}
+            allowed |= {'seeds', 'treatment', 'benchmark_episodes', 'model', 'receptors', 'embedding_selection'}
         if kind == 'starting-population-benchmark':
             allowed |= {'population_a','population_b'}
         if set(config) - allowed:
@@ -172,6 +220,8 @@ class SessionManager:
             raise ValueError('Notes must be text, at most 2000 characters')
         args = ['--output', str(directory), '--episodes', str(integer(config, 'episodes', 100)),
                 '--assessment-episodes', str(integer(config, 'assessment_episodes', 2000 if kind == 'interfaces' else 200))]
+        if kind in (*TRAINING, *COMPARISONS):
+            args += structure_arguments(config)
         if kind in (*TRAINING, 'senses'):
             args += ['--seed', str(integer(config, 'seed', 48, 0, 2**32 - 1))]
         if kind in (*TRAINING, *COMPARISONS, 'interfaces'):
@@ -190,13 +240,13 @@ class SessionManager:
         if kind in TRAINING:
             args += ['--population-save-count',str(integer(config,'population_save_count',10))]
             if config.get('initial_population'):
-                from .populations import read_population, validate_compatibility
+                from .populations import read_population, validate_compatibility, sensory_apparatus
                 from .evolution import TrainingConfig
                 source = self.population_path(config['initial_population'])
                 saved = read_population(source)
                 imported = saved['config']
                 validate_compatibility(saved,TrainingConfig(model='senses' if kind=='sensory-training' else 'categorical',
-                    environment=environment,receptors=config.get('receptors',256),
+                    environment=environment,**sensory_apparatus(config),
                     varying_goals=imported.get('varying_goals',False),encoding_seed=imported.get('encoding_seed',0)),allow_new_environment=True)
                 args += ['--initial-population',str(source),'--encoding-seed',str(imported.get('encoding_seed',0))]
                 if not imported.get('varying_goals',False):args.append('--fixed-goal')
@@ -208,10 +258,34 @@ class SessionManager:
             args.append('--inherit-lifetime' if boolean(config, 'inherit_lifetime', False) else '--no-inherit-lifetime')
             args.append('--speciation' if boolean(config, 'speciation', False) else '--no-speciation')
         if kind in ('senses', 'interfaces', 'sensory-training', *COMPARISONS):
-            receptors = integer(config, 'receptors', 256, 16)
-            if receptors % 16:
+            selection=config.get('embedding_selection','argmax')
+            if selection not in ('sample','argmax'):raise ValueError('Embedding selection must be sample or argmax')
+            args += ['--embedding-selection',selection]
+            interface = config.get('sensory_interface','legacy-bytes')
+            if interface not in ('legacy-bytes','retina','signals'):
+                raise ValueError('Unknown sensory interface')
+            width = integer(config,'retina_width',16)
+            height = integer(config,'retina_height',16)
+            receptors = integer(config, 'receptors', width*height if interface in ('retina','signals') else 256, 1 if interface in ('retina','signals') else 16)
+            if interface in ('retina', 'signals') and receptors != width*height:
+                raise ValueError('Receptor resolution must equal layout width × height')
+            if interface == 'legacy-bytes' and receptors % 16:
                 raise ValueError('Receptor count must be a multiple of 16')
             args += ['--receptors', str(receptors)]
+            if kind in ('sensory-training', *COMPARISONS):
+                args += ['--sensory-interface',interface,'--retina-width',str(width),'--retina-height',str(height)]
+        if kind in ('senses', 'sensory-training', *COMPARISONS):
+            sensory_partitions = integer(config, 'sensory_partitions', 1, 1, receptors)
+            action_policy = config.get('action_policy', 'agreement')
+            if action_policy not in ('agreement', 'vote'):
+                raise ValueError('Action policy must be agreement or vote')
+            if sensory_partitions > 1:
+                if kind in COMPARISONS and config.get('model', 'categorical') != 'senses':
+                    raise ValueError('Categorical models cannot use multiple sensory partitions')
+                if selection != 'argmax':
+                    raise ValueError('Multiple sensory partitions require argmax embedding selection')
+            if kind in ('senses', 'sensory-training') or 'sensory_partitions' in config or 'action_policy' in config:
+                args += ['--sensory-partitions', str(sensory_partitions), '--action-policy', action_policy]
         if kind in ('interfaces', *COMPARISONS):
             seeds = [integer(config,'seed',48,0,2**32-1)] if kind=='starting-population-benchmark' else config.get('seeds', [48, 49, 50])
             if (not isinstance(seeds, list) or not 1 <= len(seeds) <= 32 or
@@ -224,7 +298,7 @@ class SessionManager:
                 raise ValueError('Unknown model')
             args += ['--model', model]
             if kind=='starting-population-benchmark':
-                from .populations import read_population, validate_compatibility
+                from .populations import read_population, validate_compatibility, sensory_apparatus
                 from .evolution import TrainingConfig
                 sources={}
                 for arm in ('a','b'):
@@ -236,7 +310,7 @@ class SessionManager:
                 if len(modes)>1:
                     raise ValueError('Both starting populations must use the same action encoding and goal-input mode')
                 encoding,goals=next(iter(modes)) if modes else (0,True)
-                shared=TrainingConfig(model=model,environment=environment,receptors=config.get('receptors',256),encoding_seed=encoding,varying_goals=goals)
+                shared=TrainingConfig(model=model,environment=environment,**sensory_apparatus(config),encoding_seed=encoding,varying_goals=goals)
                 for arm,(path,saved) in sources.items():
                     validate_compatibility(saved,shared,allow_new_environment=True)
                     args+=['--population-'+arm,str(path)]

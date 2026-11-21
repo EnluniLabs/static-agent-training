@@ -6,7 +6,7 @@ import math
 from pathlib import Path
 import random
 
-from .environments import environment_spec
+from .environments import environment_spec, categorical_world
 from .agent import Agent, run_episode
 from .candidates import load_saved_candidate
 from .environment import NumberLine, Output
@@ -39,7 +39,11 @@ def compare(directory, *, episodes=2000, seed=20261101):
     spec = environment_spec(config.get('environment', 'original'))
     conditioned = bundle.get('varying_goals', False)
     distribution = config.get('distance_distribution', 'uniform')
-    if distribution == 'normal':
+    if spec.kind=='lights-out':
+        from .lights_out import sample_tasks as puzzle_tasks
+        tasks=puzzle_tasks(derive(seed,'benchmark-tasks'),episodes,split,bundle.get('environment','original'))
+        distribution='uniform-solvable-boards'
+    elif distribution == 'normal':
         tasks = sample_tasks(derive(seed, 'benchmark-tasks'), episodes, starts=split,
                              goals=split if conditioned else (spec.center,),
                              mean=config.get('distance_mean', 10.0), stddev=config.get('distance_stddev', 5.0), **spec.world_kwargs)
@@ -60,8 +64,8 @@ def compare(directory, *, episodes=2000, seed=20261101):
     agent = Agent(species.repertoire, maps, learning=False,
                   embedding_seed=derive(seed, 'benchmark-animal-embedding'),
                   output_seed=derive(seed, 'benchmark-animal-output'))
-    animal_world = NumberLine(encoding_seed=bundle['encoding_seed'], goal_conditioned=conditioned, boundary_mode=config.get('boundary_mode','terminate'), **spec.world_kwargs)
-    random_world = NumberLine(encoding_seed=bundle['encoding_seed'], goal_conditioned=conditioned, boundary_mode=config.get('boundary_mode','terminate'), **spec.world_kwargs)
+    animal_world = categorical_world(bundle.get('environment','original'),encoding_seed=bundle['encoding_seed'],goal_conditioned=conditioned,boundary_mode=config.get('boundary_mode','terminate'))
+    random_world = categorical_world(bundle.get('environment','original'),encoding_seed=bundle['encoding_seed'],goal_conditioned=conditioned,boundary_mode=config.get('boundary_mode','terminate'))
     moves = tuple(random_world.diagnostic_state()['move_decoding'])
     move_rng = random.Random(derive(seed, 'benchmark-random-moves'))
     outcomes = []
@@ -80,9 +84,9 @@ def compare(directory, *, episodes=2000, seed=20261101):
                   distance_distribution=distribution,
                   distance_mean=config.get('distance_mean', 10.0) if distribution == 'normal' else None,
                   distance_stddev=config.get('distance_stddev', 5.0) if distribution == 'normal' else None,
-                  random_policy='uniform over nine movement buttons including zero; no expectations; same 12-move limit',
+                  random_policy='uniform over nine puzzle buttons; 12 presses' if spec.kind=='lights-out' else 'uniform over nine movement buttons including zero; no expectations; same 12-move limit',
                   environment=config.get('environment','original'), boundary_mode=config.get('boundary_mode','terminate'),
-                  exact_random_success=random_task_mean([s for s,g in tasks], [g for s,g in tasks],boundary_mode=config.get('boundary_mode','terminate'), **spec.world_kwargs),
+                  exact_random_success=random_task_mean([s for s,g in tasks], [g for s,g in tasks],boundary_mode=config.get('boundary_mode','terminate'), **spec.baseline_kwargs),
                   outcomes=outcomes)
     for name in ('animal', 'random'):
         successes = sum(row[name + '_success'] for row in outcomes)

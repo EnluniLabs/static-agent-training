@@ -1,7 +1,7 @@
 """Fixed-structure learning and range transfer using the opaque byte model."""
 import argparse
 from collections import Counter
-import json
+from .. import serialization as json
 import os
 from pathlib import Path
 import random
@@ -17,6 +17,7 @@ from ..seeds import derive
 from .bit_model import BitModel, run_episode
 from .number_line import StimulusNumberLine
 from .senses import FixedSenses, SensoryAdapter
+from .apparatus import make_senses
 
 
 def tasks(seed, count, lower, upper, *, exclude=()):
@@ -46,11 +47,13 @@ def block(model, world, task_list, *, learn):
                 event_counts=dict(Counter(e['kind'] for e in events)))
 
 
-def experiment(repertoire, *, seed=48, episodes=100, assessment_episodes=200, receptors=256):
+def experiment(repertoire, *, seed=48, episodes=100, assessment_episodes=200, receptors=256, embedding_selection="argmax", sensory_partitions=1, action_policy="agreement", sensory_interface="legacy-bytes", retina_width=16, retina_height=16):
     if any(type(n) is not int or n < 1 for n in (episodes, assessment_episodes)):
         raise ValueError('episode counts must be positive integers')
-    senses = FixedSenses(receptors=receptors)
-    model = BitModel(repertoire, seed=seed, senses=senses)
+    senses = make_senses(receptors=receptors, sensory_partitions=sensory_partitions,
+                         sensory_interface=sensory_interface, retina_width=retina_width, retina_height=retina_height)
+    model = BitModel(repertoire, seed=seed, senses=senses,embedding_selection=embedding_selection,
+                     sensory_partitions=sensory_partitions, action_policy=action_policy)
     def world(lower=-20, upper=20):
         return SensoryAdapter(StimulusNumberLine(lower=lower, upper=upper), senses)
     initial = model.to_data()
@@ -90,8 +93,9 @@ def experiment(repertoire, *, seed=48, episodes=100, assessment_episodes=200, re
         results[name] = dict(adaptation=adaptation, frozen_evaluation=scores,
                              event_counts=dict(Counter(e['kind'] for e in candidate.events)))
         snapshots[name] = adapted
-    report = dict(schema_version='crt-bit-experiment-v2', seed=seed, spec=model.spec.to_data(),
-                  senses=senses.to_data(), world_serialization='utf8-json-array-position-goal-v1',
+    report = dict(schema_version='crt-bit-experiment-v2', seed=seed, embedding_selection=embedding_selection,
+                  sensory_partitions=sensory_partitions, action_policy=action_policy, spec=model.spec.to_data(),
+                  senses=model.senses.to_data(), world_serialization=({'retina':'egocentric-binary-retina-v1', 'signals':'local-numeric-readings-v1'}.get(sensory_interface,'utf8-json-array-position-goal-v1')),
                   structure_hash=structure, training=training, results=results,
                   repertoire_nodes=len(repertoire.pairs), repertoire_edges=len(repertoire.successors),
                   task_lists=dict(training=training_tasks, adaptation=adaptation_tasks, evaluation=test),
@@ -106,15 +110,23 @@ def main():
     parser.add_argument('--seed', type=int, default=48)
     parser.add_argument('--episodes', type=int, default=100)
     parser.add_argument('--assessment-episodes', type=int, default=200)
-    parser.add_argument('--receptors', type=int, default=256, help='fixed animal sensory capacity, chosen once at initialization')
+    parser.add_argument('--embedding-selection',choices=('sample','argmax'),default='argmax')
+    parser.add_argument('--sensory-partitions', type=int, default=1)
+    parser.add_argument('--action-policy', choices=('agreement', 'vote'), default='agreement')
+    parser.add_argument('--sensory-interface', choices=('legacy-bytes','retina','signals'), default='legacy-bytes')
+    parser.add_argument('--retina-width', '--receptor-width', type=int, default=16)
+    parser.add_argument('--retina-height', '--receptor-height', type=int, default=16)
+    parser.add_argument('--receptors', type=int, default=None, help='fixed animal sensory capacity, chosen once at initialization')
     parser.add_argument('--label', default='', help='short experiment label saved in run.json')
     parser.add_argument('--notes', default='', help='purpose or hypothesis saved with this run')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
+    if args.receptors is None:
+        args.receptors = args.retina_width*args.retina_height if args.sensory_interface in ('retina','signals') else 256
     if args.output.exists() and any(args.output.iterdir()):
         parser.error('output directory must be empty')
     metadata = dict(schema_version='crt-sensory-run-v1', status='running', pid=os.getpid(),
-                    created=time.time(), seed=args.seed, receptors=args.receptors,
+                    created=time.time(), sensory_partitions=args.sensory_partitions, action_policy=args.action_policy, seed=args.seed, receptors=args.receptors,embedding_selection=args.embedding_selection,
                     episodes=args.episodes, assessment_episodes=args.assessment_episodes,
                     label=args.label, notes=args.notes, argv=sys.argv,
                     candidate=str(args.candidate.resolve()) if args.candidate else None)
@@ -130,7 +142,9 @@ def main():
             repertoire = Repertoire.from_data(run(pairs, 64, seed=args.seed)['repertoire'])
             provenance = dict(initialization_seed=args.seed, initial_pairs=generated)
         report, snapshots = experiment(repertoire, seed=args.seed, episodes=args.episodes,
-                                       assessment_episodes=args.assessment_episodes, receptors=args.receptors)
+                                       assessment_episodes=args.assessment_episodes, receptors=args.receptors,embedding_selection=args.embedding_selection,
+                                       sensory_partitions=args.sensory_partitions, action_policy=args.action_policy,
+                                       sensory_interface=args.sensory_interface,retina_width=args.retina_width,retina_height=args.retina_height)
         report['structure_source'] = provenance
         for name, snapshot in snapshots.items():
             write_json(args.output / f'{name}.json.gz', snapshot)

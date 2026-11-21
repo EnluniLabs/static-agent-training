@@ -33,6 +33,8 @@ Run tools (only when explicitly invoked):
   speed [options]            Evaluator throughput benchmark
   assess [options]           Frozen saved-population assessment
   populations save|benchmark Save reusable populations or compare several sets
+  stream [options]          Inspect byte streams or run a saved sensory agent
+  switchboard-test [options] Matched single/parallel three-panel experiment
   trace-learning [options]   Record one learning event in both models
   demo [RUN] [options]       Model workspace (optional legacy baseline source)
   ui [options]              Model workspace, session control and playground
@@ -165,7 +167,7 @@ def main(root, argv=None):
             return
         modules = dict(status='status', compare='comparison', senses='experimental.bit_experiment',
                        benchmark='benchmark', audit='bias_audit', speed='speed', demo='play',
-                       ui='play', assess='assessments', populations='populations', **{'trace-learning': 'learning_trace', 'compare-models': 'experimental.model_comparison'})
+                       ui='play', assess='assessments', populations='populations', **{'stream': 'stream_inspect', 'switchboard-test': 'switchboard_benchmark', 'trace-learning': 'learning_trace', 'compare-models': 'experimental.model_comparison'})
         if command not in modules:
             raise ValueError(f'Unknown command: {command}. Use ./project help.')
         help_requested = any(a in ('-h', '--help') for a in args)

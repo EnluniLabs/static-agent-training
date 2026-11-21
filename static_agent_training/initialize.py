@@ -10,20 +10,27 @@ import random
 
 # Immutable De Bruijn ASTs: ("var", index), ("abs", body), ("app", fn, arg).
 def canonical_bytes(term):
-    tag, *children = term
-    if tag == "var":
-        value = children[0]
-        encoded = bytearray()
-        while value >= 128:
-            encoded.append((value & 127) | 128)
-            value >>= 7
-        encoded.append(value)
-        return b"v" + bytes(encoded)
-    if tag == "abs":
-        return b"l" + canonical_bytes(children[0])
-    if tag == "app":
-        return b"a" + canonical_bytes(children[0]) + canonical_bytes(children[1])
-    raise ValueError(f"Unknown node: {tag}")
+    encoded = bytearray()
+    pending = [term]
+    while pending:
+        node = pending.pop()
+        tag = node[0]
+        if tag == "var":
+            encoded.append(ord("v"))
+            value = node[1]
+            while value >= 128:
+                encoded.append((value & 127) | 128)
+                value >>= 7
+            encoded.append(value)
+        elif tag == "abs":
+            encoded.append(ord("l"))
+            pending.append(node[1])
+        elif tag == "app":
+            encoded.append(ord("a"))
+            pending.extend((node[2], node[1]))
+        else:
+            raise ValueError(f"Unknown node: {tag}")
+    return bytes(encoded)
 
 
 def term_id(term):
@@ -37,25 +44,56 @@ def pair_id(left, right):
 
 
 def node_count(term):
-    return 1 if term[0] == "var" else 1 + sum(node_count(t) for t in term[1:])
+    count = 0
+    pending = [term]
+    while pending:
+        node = pending.pop()
+        count += 1
+        if node[0] != "var":
+            pending.extend(reversed(node[1:]))
+    return count
 
 
 def depth(term):
-    return 1 if term[0] == "var" else 1 + max(depth(t) for t in term[1:])
+    maximum = 0
+    pending = [(term, 1)]
+    while pending:
+        node, level = pending.pop()
+        maximum = max(maximum, level)
+        if node[0] != "var":
+            pending.extend((child, level + 1) for child in reversed(node[1:]))
+    return maximum
 
 
 def is_closed(term, binders=0):
-    if term[0] == "var":
-        return 0 <= term[1] < binders
-    return all(is_closed(t, binders + (term[0] == "abs")) for t in term[1:])
+    pending = [(term, binders)]
+    while pending:
+        node, bound = pending.pop()
+        if node[0] == "var":
+            if not 0 <= node[1] < bound:
+                return False
+        else:
+            pending.extend((child, bound + (node[0] == "abs"))
+                           for child in reversed(node[1:]))
+    return True
 
 
 def display(term):
-    if term[0] == "var":
-        return str(term[1])
-    if term[0] == "abs":
-        return "λ." + display(term[1])
-    return "(" + display(term[1]) + " " + display(term[2]) + ")"
+    pieces = []
+    pending = [term]
+    while pending:
+        node = pending.pop()
+        if isinstance(node, str):
+            pieces.append(node)
+        elif node[0] == "var":
+            pieces.append(str(node[1]))
+        elif node[0] == "abs":
+            pieces.append("λ.")
+            pending.append(node[1])
+        else:
+            pieces.append("(")
+            pending.extend((")", node[2], " ", node[1]))
+    return "".join(pieces)
 
 
 @dataclass(frozen=True)

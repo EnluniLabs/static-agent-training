@@ -3,7 +3,7 @@
 from collections import Counter
 import math
 
-from .environments import environment_spec
+from .environments import environment_spec, categorical_world
 from .agent import Agent, run_episode
 from .environment import NumberLine
 from .mappings import LifetimeMappings
@@ -56,14 +56,14 @@ def evaluate(individual, training_starts, assessment_starts, *, seed, encoding_s
                   embedding_seed=derive(seed, 'training', 'embedding'),
                   output_seed=derive(seed, 'training', 'output'),
                   learning=learning, learning_config=learning_config)
-    training = _block(agent, NumberLine(encoding_seed=encoding_seed, goal_conditioned=conditioned, boundary_mode=boundary_mode, **environment_spec(environment).world_kwargs), training_starts,
+    training = _block(agent, categorical_world(environment,encoding_seed=encoding_seed,goal_conditioned=conditioned,boundary_mode=boundary_mode), training_starts,
                       learn=learning, goals=training_goals)
     # Independent RNG and weight copies prevent assessment changing the training lifetime.
     assessor = Agent(individual.repertoire, LifetimeMappings(agent.mappings),
                      embedding_seed=derive(seed, 'assessment', 'embedding'),
                      output_seed=derive(seed, 'assessment', 'output'), learning=False,
                      learning_config=learning_config)
-    assessment = _block(assessor, NumberLine(encoding_seed=encoding_seed, goal_conditioned=conditioned, boundary_mode=boundary_mode, **environment_spec(environment).world_kwargs), assessment_starts,
+    assessment = _block(assessor, categorical_world(environment,encoding_seed=encoding_seed,goal_conditioned=conditioned,boundary_mode=boundary_mode), assessment_starts,
                         learn=False, goals=assessment_goals)
     result = dict(genotype_id=individual.genotype_id, seed=seed, training=training, assessment=assessment,
                   repertoire_size=len(individual.repertoire.pairs),

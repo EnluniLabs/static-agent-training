@@ -8,16 +8,29 @@ from .initialize import is_closed, pair_id
 
 def freeze(term):
     """Validate and convert JSON ASTs to immutable tuple ASTs."""
-    if not isinstance(term, (tuple, list)) or not term:
-        raise ValueError('invalid AST')
-    tag = term[0]
-    if tag == 'var' and len(term) == 2 and type(term[1]) is int and term[1] >= 0:
-        return (tag, term[1])
-    if tag == 'abs' and len(term) == 2:
-        return (tag, freeze(term[1]))
-    if tag == 'app' and len(term) == 3:
-        return (tag, freeze(term[1]), freeze(term[2]))
-    raise ValueError('invalid AST')
+    pending = [(term, False)]
+    values = []
+    while pending:
+        node, visited = pending.pop()
+        if visited:
+            if node[0] == 'abs':
+                values.append(('abs', values.pop()))
+            else:
+                right = values.pop()
+                left = values.pop()
+                values.append(('app', left, right))
+            continue
+        if not isinstance(node, (tuple, list)) or not node:
+            raise ValueError('invalid AST')
+        tag = node[0]
+        if tag == 'var' and len(node) == 2 and type(node[1]) is int and node[1] >= 0:
+            values.append((tag, node[1]))
+        elif (tag == 'abs' and len(node) == 2) or (tag == 'app' and len(node) == 3):
+            pending.append((node, True))
+            pending.extend((child, False) for child in reversed(node[1:]))
+        else:
+            raise ValueError('invalid AST')
+    return values[0]
 
 
 @dataclass(frozen=True)

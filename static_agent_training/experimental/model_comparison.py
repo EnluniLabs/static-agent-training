@@ -4,7 +4,7 @@ from collections import Counter
 from datetime import datetime
 import fcntl
 import hashlib
-import json
+from .. import serialization as json
 import os
 from pathlib import Path
 import random
@@ -27,6 +27,7 @@ from ..seeds import derive
 from .bit_model import BitModel, run_episode as sensory_episode
 from .number_line import StimulusNumberLine
 from .senses import FixedSenses, SensoryAdapter
+from .apparatus import make_senses
 
 
 def digest(data):
@@ -115,7 +116,10 @@ def run_pair(directory, seed, animal, plan, task_lists):
     old = Agent(repertoire, maps.lifetime(),
                 embedding_seed=derive(seed, 'interface-training-embedding', animal),
                 output_seed=derive(seed, 'interface-training-output', animal))
-    sensory = BitModel(repertoire, senses=FixedSenses(receptors=plan['receptors']),
+    sensory = BitModel(repertoire, senses=make_senses(receptors=plan['receptors'],
+        sensory_partitions=plan.get('sensory_partitions',1),sensory_interface=plan.get('sensory_interface','legacy-bytes'),
+        retina_width=plan.get('retina_width',16),retina_height=plan.get('retina_height',16)),
+        sensory_partitions=plan.get('sensory_partitions',1),embedding_selection=plan.get('embedding_selection','sample'),
                        seed=derive(seed, 'interface-parameters', animal))
     sensory.embedding_rng.seed(derive(seed, 'interface-training-embedding', animal))
     sensory.output_rng.seed(derive(seed, 'interface-training-output', animal))
@@ -145,7 +149,7 @@ def run_pair(directory, seed, animal, plan, task_lists):
     if (assessor.mappings.embedding != {s: dict(row) for s, row in learned.embedding.items()} or
             assessor.mappings.output != {s: dict(row) for s, row in learned.output.items()}):
         raise AssertionError('frozen baseline changed parameters')
-    result = dict(seed=seed, animal=animal, structure_hash=structure_hash,
+    result = dict(seed=seed, animal=animal, embedding_selection=sensory.embedding_selection,structure_hash=structure_hash,
                   repertoire_nodes=len(repertoire.pairs), repertoire_edges=len(repertoire.successors),
                   task_hash=digest(task_lists),
                   parameter_counts=dict(old=len(repertoire.pairs) * 132,
@@ -199,12 +203,16 @@ def run_study(directory, plan=None, *, resume=False):
         raise ValueError('output is not empty; choose a new output or use --resume')
     if plan is None:
         raise ValueError('a new study requires a plan')
+    plan.setdefault('embedding_selection','sample' if resume else 'argmax')
+    if plan['embedding_selection'] not in ('sample','argmax'):raise ValueError('invalid embedding selection')
     for key in ('population', 'episodes', 'assessment_episodes'):
         if type(plan[key]) is not int or plan[key] < 1:
             raise ValueError(f'{key} must be positive')
     if not plan['seeds'] or len(set(plan['seeds'])) != len(plan['seeds']) or any(type(s) is not int for s in plan['seeds']):
         raise ValueError('seeds must be nonempty distinct integers')
-    FixedSenses(receptors=plan['receptors'])
+    make_senses(receptors=plan['receptors'],sensory_partitions=plan.get('sensory_partitions',1),
+        sensory_interface=plan.get('sensory_interface','legacy-bytes'),
+        retina_width=plan.get('retina_width',16),retina_height=plan.get('retina_height',16))
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / '.lock').open('a') as lock:
         try:
@@ -248,23 +256,31 @@ def main():
     parser.add_argument('--seeds', type=int, nargs='+', default=[48, 49, 50])
     parser.add_argument('--episodes', type=int, default=100)
     parser.add_argument('--assessment-episodes', type=int, default=2000)
-    parser.add_argument('--receptors', type=int, default=256)
+    parser.add_argument('--embedding-selection',choices=('sample','argmax'),default='argmax')
+    parser.add_argument('--receptors', type=int, default=None)
+    parser.add_argument('--sensory-interface', choices=('legacy-bytes','retina','signals'), default='legacy-bytes')
+    parser.add_argument('--retina-width', '--receptor-width', type=int, default=16)
+    parser.add_argument('--retina-height', '--receptor-height', type=int, default=16)
+    parser.add_argument('--sensory-partitions', type=int, default=1)
     parser.add_argument('--output', type=Path)
     parser.add_argument('--resume', type=Path)
     parser.add_argument('--memory-limit-mb', type=int, default=4096)
     args = parser.parse_args()
+    if args.receptors is None:
+        args.receptors=args.retina_width*args.retina_height if args.sensory_interface in ('retina','signals') else 256
     if args.output and args.resume:
         parser.error('choose --output or --resume')
     if args.resume and any(value.split('=', 1)[0] in
-            ('--population', '--seeds', '--episodes', '--assessment-episodes', '--receptors') for value in sys.argv[1:]):
+            ('--population', '--seeds', '--episodes', '--assessment-episodes', '--receptors', '--embedding-selection','--sensory-interface','--retina-width','--retina-height','--receptor-width','--receptor-height','--sensory-partitions') for value in sys.argv[1:]):
         parser.error('resume uses the saved plan; only --memory-limit-mb may override')
     directory = args.resume or args.output or Path('runs/interfaces') / datetime.now().strftime('old-vs-senses-%Y%m%d-%H%M%S-%f')
     plan = dict(population=args.population, seeds=args.seeds, episodes=args.episodes,
-                assessment_episodes=args.assessment_episodes, receptors=args.receptors,
+                assessment_episodes=args.assessment_episodes, receptors=args.receptors,embedding_selection=args.embedding_selection,
+                sensory_interface=args.sensory_interface,retina_width=args.retina_width,retina_height=args.retina_height,sensory_partitions=args.sensory_partitions,
                 boundary_mode='clamp', bounds=[-20, 20], action_limit=12, internal_limit=16,
                 parameter_initialization_scale=.1, speciation=False, evolution=False)
     plan['learning'] = dict(prediction_rate=.05, embedding_rate=.05, compatibility_threshold=.1)
-    plan['world_serialization'] = 'old-categorical-positions-and-goals; senses-utf8-json-position-goal'
+    plan['world_serialization'] = 'old-categorical-positions-and-goals; senses-' + {'retina':'egocentric-binary-retina-v1','signals':'local-numeric-readings-v1'}.get(args.sensory_interface,'utf8-json-position-goal')
     package = Path(__file__).resolve().parents[1]
     source_files = ['agent.py', 'learning.py', 'mappings.py', 'environment.py', 'engine.py',
                     'initialize.py', 'reduction.py', 'experimental/bit_model.py', 'experimental/senses.py',

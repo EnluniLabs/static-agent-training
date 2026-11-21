@@ -526,3 +526,221 @@ counts. Stop an assessment from its results panel to retain partial results.
   --environment shifted --episodes 200 --seed 48 --workers 4 \
   --output runs/frozen-assessment
 ```
+
+## Lights Out puzzle
+
+**Lights Out · 3×3 puzzle** is also available in every environment selector and as
+`--environment lights-out`. Each press toggles one light and its orthogonal
+neighbors; all lights off wins within 12 presses. Every sampled starting board is
+solvable. Training, candidate reuse, evolutionary comparisons, frozen assessments,
+and board-based playground replay support both models on native CPU and Python.
+See [the Lights Out environment contract](docs/LIGHTS_OUT.md) for encoding, task
+partitions, exact random controls and reproducibility details. Puzzle tasks have a
+fixed all-off goal and no walls or numeric movement distances.
+
+**Simple switches · 2×2** (`--environment switches-2x2`) is the simpler puzzle
+option. Each button toggles only its own light, so every board can be solved in at
+most four useful presses. It is available in training, population comparisons,
+frozen assessments and the playground. **Lights Out · 3×3 puzzle** remains
+available with neighbor toggling. Both retain the nine action signals for saved
+model compatibility; the 2×2 mapping has two signals per light and one idle signal.
+See [puzzle rules and encodings](docs/LIGHTS_OUT.md#simpler-option-independent-2×2-switches).
+
+For a middle difficulty, choose **Lights Out · 2×2 puzzle**
+(`--environment lights-out-2x2`). Each press toggles its own light and its two
+orthogonal neighbors. All 16 boards are solvable within four useful presses, but
+switches interact. Simple switches · 2×2 and Lights Out · 3×3 remain available.
+This option works in training, population comparisons, frozen assessments and the
+playground, including saved candidates. See [puzzle rules](docs/LIGHTS_OUT.md).
+
+Evolutionary session details show **Mean unique initial pairs / animal** for the
+latest completed generation. Under **Track**, choose **Mean unique initial pairs
+per animal** to plot its history. Count distinct ordered seed term pairs within
+each animal, then average those counts across the evaluated population, including
+elites. Duplicate seed pairs count once; developed successor states do not count.
+The metric is recorded by both model trainers. Historical generations without the
+field show unavailable; already-running trainers need a stop/resume to load the
+new recorder. Refreshing the visualizer alone cannot update a training process.
+
+Fixed-sense experiments now default to **argmax** embedding selection: choose the
+highest-probability initial repertoire state, with uniform seeded random breaking
+of exact ties. Under **New session → Fixed-senses**, use **Embedding selection**
+to choose this or the original **sample** policy. CLI example:
+
+```sh
+./project train --model senses --embedding-selection argmax --backend native
+./project train --model senses --embedding-selection sample --backend native
+```
+
+The mode is recorded in configs, checkpoints, results and saved sensory models.
+Historical files lacking the mode retain sample during resume, assessment and
+playback. Existing running processes retain their loaded behavior. See
+[the selection policy contract](docs/AGNOSTIC_INTERFACE.md#embedding-selection-policy).
+
+## Delete saved sessions and candidates
+
+Select a past session under **Sessions**, then click **Delete session**. This removes
+its directory, adjacent log/diagnostics and managed-session registry entry from the
+library. Exported candidate sets remain available. Separate comparison-arm training
+sessions are retained when a comparison report session is deleted.
+
+Under **Assessments → Saved populations**, use the **Delete** button beside a
+candidate set. Deleting an exported set preserves its source training session and
+copies already retained inside other experiments. Future sessions cannot select
+the deleted set. Stop active sessions before deleting them or inputs they reference;
+the server checks this even if a UI button was enabled before a job started.
+
+Deletion asks for confirmation and moves files into the project-local
+`.workspace-trash/<id>/` directory, rather than permanently erasing them. A
+`manifest.json` records original relative paths and stored locations for recovery.
+Trash is excluded from the session library and Git. It continues to occupy disk
+space; permanent trash cleanup and an in-app restore control are not implemented.
+No existing item is deleted automatically on installing or opening the UI.
+
+The Assessments page provides searchable population cards with model/environment
+labels, **Select visible** and **Clear** controls, and a live candidate/episode total.
+Search hides cards without clearing selections. Test conditions sit beside the
+population library on wide screens; worker and boundary controls are under
+**Execution settings**. Saved results show candidate progress, ranked mean scores,
+best/worst scores, and the random baseline as an amber marker. Expand a population
+for individual candidate metrics; download the full report for the raw results.
+Rankings are descriptive scores on the saved tasks, not significance estimates.
+
+## 3D agent mappings
+
+In **Animal playground**, select a saved snapshot and expand **3D brain scan**.
+Click **Load / refresh mappings**, drag to rotate, scroll to zoom, and click a node
+for exact displayed connection values. The layout has two folded hemispheres, a
+sensory input bank and output signal terminals. The cortical outline is a visual
+guide; only the dots and colored links represent agent nodes and mappings. Filter input mappings, repertoire successor
+links, output policy, or prediction bits. Arrowheads on selected connections show
+direction; red sensory connections have negative weights. State inspection includes
+its complete pair ID and, for sensory models, its embedding bias.
+
+The view reads the selected saved weights, or the current playground lifetime if
+one exists. Refresh after a learning attempt to see its updated mappings. It does
+not inspect a running trainer's in-progress animal, change weights, or consume agent
+randomness. Positions are an illustrative 3D layout, not anatomical coordinates or
+measured similarity. All nodes and successor links are included; other connections
+are limited to the four strongest values per source and mapping group (absolute
+weight for sensory inputs, probability otherwise). Sensory prediction-bit
+probabilities are conditional on their prediction channel; input weights are not
+observation-conditioned embedding probabilities. Replay highlights active states and traversed links. Graph weights remain those
+of the loaded snapshot or current learned lifetime, rather than reconstructed
+weights at each historical replay frame.
+
+## Agent X: parallel sensory chains
+
+Under **New session → Model**, choose **Agent X · parallel sensory chains**.
+This preset defaults to `signals`: an immutable 16×16 indexing layout of 256
+binary receptors with four fixed tiles and highest-probability embedding. Each
+receptor holds one bit; dual-rail conversion fits 16 source bytes in 256 bits.
+Up to 256 partitions are possible without changing capacity. This is not a camera.
+Number Line supplies 16 local numeric readings at offsets −8..7, independent of
+layout: outside 0, normal 64, self 128, in-view goal 255 when goal-conditioned.
+There are no glyphs, coordinates or offscreen goal hints. Puzzle worlds supply
+existing `bytes(board_bits(...))` through the same generic dual-rail conversion.
+Analog digitization belongs to adapters; binary signals are an approximation.
+See [Receptor signals](docs/RECEPTOR_SIGNALS.md). Each fixed
+receptor region activates its own pair and follows its own continuation. Select
+**Parallel action policy**:
+
+- **Agreement:** execute a shared action once; disagreement produces a no-op.
+- **Vote:** execute the unique most-voted action once; a tie produces a no-op.
+
+No-ops consume one action step. Predictions remain separate and each predicts the
+complete next sensory pattern. Both Python and native evaluation support this.
+One partition preserves the existing single-chain baseline; new Agent X uses four tiles.
+Saved snapshots, resumed sessions and frozen assessments retain these settings.
+Playground replay lists active regions and action proposal counts; the brain scan
+labels regional inputs. The receptor overlay shows the first emitted prediction
+when a round contains several predictions; the replay payload retains them all.
+
+```sh
+./project train --model senses --sensory-interface signals --receptor-width 16 --receptor-height 16 --sensory-partitions 4 --action-policy agreement --backend native
+./project train --model senses --sensory-interface signals --receptor-width 16 --receptor-height 16 --sensory-partitions 4 --action-policy vote --backend native
+```
+
+See [Agent X behavior and experimental limits](docs/AGENT_X.md). Existing saved
+single-chain agents stay single-chain; start a new configured experiment to test
+parallel activation, optionally using saved candidate weights.
+
+## Three-panel switchboard
+
+Choose **Three-panel switchboard** (`--environment switchboard`) to test parallel
+sensory activation on three independent panels of three lights. Each button
+toggles one light; turn all nine off within 12 actions. The historical legacy-byte control configuration
+is **144 receptors, 3 sensory partitions, argmax selection**: each partition sees
+one complete panel. Agreement and voting resolve their shared action interface.
+Whole-observation single-chain agents can use the same environment and weights.
+
+```sh
+./project train --model senses --environment switchboard --sensory-interface legacy-bytes --receptors 144 \
+  --sensory-partitions 3 --action-policy vote --backend native
+```
+
+The matched test command compares a single chain, three chains with agreement,
+and three chains with voting using the same initial populations and task seeds:
+
+```sh
+./project switchboard-test --output runs/my-switchboard-test \
+  --population 16 --generations 10 --episodes 50 --assessment-episodes 100 \
+  --benchmark-episodes 100 --seeds 48 49 50 --backend native
+```
+
+This launches new experiments. Use a new output name; existing results are
+preserved. The report records the shared tasks, per-arm configurations, curves,
+compute counts and frozen evaluation results. Arm sessions are saved beside the
+report directory, with seed and mode suffixes, so they appear in the workspace
+library and playground. Final tasks are shared draws from the saved assessment
+start pool; they can repeat prior assessments or states visited during rollouts. Matching episode and action budgets
+does not match computation: parallel chains can produce more predictions and
+learning updates. Small smoke runs check the setup; they do not establish an
+advantage. See [rules, encoding and experimental limits](docs/SWITCHBOARD.md).
+
+## Universal data streams
+
+The receptor can consume any explicitly encoded byte stream, with the same fixed
+conversion and partitions across data sources. Transport chunks are assembled into
+stable windows at `R // 16`; with 256 receptors the default window is 16 bytes.
+Streams do not fold; unfilled tail slots remain inactive. Direct oversized byte
+observations retain generic legacy position folding and OR. Missing input remains
+distinct from empty but present bytes. Data keeps
+advancing even if the agent only predicts or produces no action.
+
+```sh
+./project stream --input input.bin --receptors 256 --partitions 4 --max-frames 16
+./project stream --input input.bin --snapshot saved-model.json.gz --output inspection.json
+```
+
+The saved sensory snapshot controls its geometry and action policy. Inspection is
+frozen by default; CLI `--learn` changes only a temporary in-memory copy. The report
+states whether EOF or a frame limit stopped reading. Existing files are preserved.
+Use `--input -` for a binary stdin stream. Text and other structured formats need
+an explicit byte encoding; no content-specific parser is added to the receptor.
+
+The playground's universal input panel previews a local file using the selected
+fixed-senses agent and highlights its active states in the 3D view. Previewing uses
+a frozen copy and preserves both saved weights and current playground learning.
+See [the universal input contract](docs/UNIVERSAL_INPUT.md) for framing, output
+handling, API examples and limits.
+
+## Give structural evolution more room
+
+**New session → Agent X** now defaults to the **Exploratory** structure profile:
+16 starting pairs, 256 reductions per pair, 127-node/depth-10 inherited terms,
+2,048-node reduction expressions and stronger structural mutation. **Baseline**
+retains the original settings; individual edits select **Custom**. The controls
+are also available to the other evolutionary models.
+
+```sh
+./project train --model senses --sensory-interface signals \
+  --receptor-width 16 --receptor-height 16 --sensory-partitions 4 \
+  --structure-preset exploratory --backend native
+```
+
+Use **Start fresh** for the full new initialization. Imported candidates retain
+their seed terms/budgets, while their offspring use the selected mutation settings.
+Existing runs and resumes retain their saved parameters. Under session details,
+choose **Track → Structural growth** to inspect developed states, convergence
+points and seed-term sizes. See [the profile and validation details](docs/EXPLORATORY_STRUCTURE.md).

@@ -4,7 +4,7 @@ import argparse
 from dataclasses import asdict, replace
 from datetime import datetime
 import gzip
-import json
+from . import serialization as json
 import os
 import shlex
 from pathlib import Path
@@ -12,6 +12,7 @@ from pathlib import Path
 from .evolution import TrainingConfig, evaluate_generation, initialize_population, partitions, reproduce
 from .genome import Species
 from .terminal import Dashboard
+from .structure_profiles import STRUCTURE_ARGUMENTS, add_structure_arguments, apply_structure_arguments
 
 
 CHECKPOINT = 'checkpoint.json.gz'
@@ -200,9 +201,15 @@ def main():
     parser.add_argument('--population', type=int)
     parser.add_argument('--initial-population', help='saved top-performer population to seed a new session')
     parser.add_argument('--population-save-count', type=int)
-    parser.add_argument('--environment', choices=('original', 'shifted'))
+    parser.add_argument('--environment', choices=('original', 'shifted', 'lights-out', 'switches-2x2', 'lights-out-2x2', 'switchboard'))
     parser.add_argument('--model', choices=('categorical', 'senses'))
     parser.add_argument('--receptors', type=int)
+    parser.add_argument('--sensory-interface', choices=('legacy-bytes','retina','signals'))
+    parser.add_argument('--retina-width', '--receptor-width', type=int)
+    parser.add_argument('--retina-height', '--receptor-height', type=int)
+    parser.add_argument('--embedding-selection', choices=('sample','argmax'))
+    parser.add_argument('--sensory-partitions', type=int, default=None)
+    parser.add_argument('--action-policy', choices=('agreement','vote'), default=None)
     parser.add_argument('--generations', type=int)
     parser.add_argument('--episodes', type=int)
     parser.add_argument('--assessment-episodes', type=int)
@@ -227,12 +234,13 @@ def main():
     parser.add_argument('--fixed-goal', action='store_true', default=None, help='use the legacy zero-target task')
     parser.add_argument('--memory-limit-mb', type=int, default=4096, help='process address-space ceiling in MiB')
     parser.add_argument('--no-live', action='store_true', help='print generation summaries instead of redrawing a graph')
+    add_structure_arguments(parser)
     args = parser.parse_args()
     try:
         if args.resume:
             if any(getattr(args, name) is not None for name in
-                   ('output', 'config', 'population', 'model', 'receptors', 'environment', 'initial_population', 'population_save_count', 'episodes', 'assessment_episodes', 'elites',
-                    'tournament_size', 'seed', 'encoding_seed', 'no_learning', 'fixed_goal', 'backend', 'workers', 'batch_size', 'distance_distribution', 'distance_mean', 'distance_stddev', 'speciation', 'speciation_threshold', 'max_species', 'boundary_mode', 'include_zero', 'inherit_lifetime')):
+                   ('output', 'config', 'population', 'model', 'receptors', 'sensory_interface', 'retina_width', 'retina_height', 'embedding_selection', 'sensory_partitions', 'action_policy', 'environment', 'initial_population', 'population_save_count', 'episodes', 'assessment_episodes', 'elites',
+                    'tournament_size', 'seed', 'encoding_seed', 'no_learning', 'fixed_goal', 'backend', 'workers', 'batch_size', 'distance_distribution', 'distance_mean', 'distance_stddev', 'speciation', 'speciation_threshold', 'max_species', 'boundary_mode', 'include_zero', 'inherit_lifetime') + STRUCTURE_ARGUMENTS):
                 parser.error('resume uses saved configuration; only --generations and --no-live may override')
             config = TrainingConfig.from_data(load_checkpoint(args.resume)['config'])
             if args.generations is not None:
@@ -240,7 +248,7 @@ def main():
             directory = args.resume
         else:
             values = {name: getattr(args, name) for name in
-                      ('population', 'model', 'receptors', 'environment', 'initial_population', 'population_save_count', 'generations', 'episodes', 'assessment_episodes', 'elites', 'tournament_size', 'seed', 'encoding_seed', 'backend', 'workers', 'batch_size', 'distance_distribution', 'distance_mean', 'distance_stddev', 'speciation', 'speciation_threshold', 'max_species', 'boundary_mode', 'include_zero', 'inherit_lifetime')
+                      ('population', 'model', 'receptors', 'sensory_interface', 'retina_width', 'retina_height', 'embedding_selection', 'sensory_partitions', 'action_policy', 'environment', 'initial_population', 'population_save_count', 'generations', 'episodes', 'assessment_episodes', 'elites', 'tournament_size', 'seed', 'encoding_seed', 'backend', 'workers', 'batch_size', 'distance_distribution', 'distance_mean', 'distance_stddev', 'speciation', 'speciation_threshold', 'max_species', 'boundary_mode', 'include_zero', 'inherit_lifetime')
                       if getattr(args, name) is not None}
             if 'population' in values and 'elites' not in values:
                 values['elites'] = min(5, values['population'] - 1)
@@ -248,7 +256,13 @@ def main():
                 values['varying_goals'] = False
             if args.no_learning:
                 values['learning'] = False
-            config = replace(TrainingConfig.from_data(json.loads(args.config.read_text())), **values) if args.config else TrainingConfig(**values)
+            base = TrainingConfig.from_data(json.loads(args.config.read_text())) if args.config else TrainingConfig()
+            interface = values.get('sensory_interface', base.sensory_interface)
+            if interface in ('retina', 'signals') and 'receptors' not in values and any(
+                    name in values for name in ('sensory_interface','retina_width','retina_height')):
+                values['receptors'] = values.get('retina_width', base.retina_width) * values.get('retina_height', base.retina_height)
+            config = replace(base, **values)
+            config = apply_structure_arguments(config, args)
             directory = args.output or Path('runs') / datetime.now().strftime('run-%Y%m%d-%H%M%S')
         dashboard = Dashboard(config, live=not args.no_live)
         print(f'Run directory: {directory}', flush=True)

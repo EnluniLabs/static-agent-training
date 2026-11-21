@@ -2,7 +2,7 @@
 
 from dataclasses import asdict, dataclass, replace
 import hashlib
-import json
+from . import serialization as json
 import math
 import random
 

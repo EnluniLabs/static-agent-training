@@ -1,5 +1,11 @@
 # Experimental fixed sensory apparatus
 
+New Agent X sessions default to the immutable `signals` interface described in
+[Receptor signals](RECEPTOR_SIGNALS.md): a 16×16 layout of 256 binary receptors,
+four fixed tiles, and one shared generic dual-rail byte transducer for all sources.
+The layout indexes receptors; it is not a camera. Historical `retina` packed-pixel
+snapshots and `legacy-bytes` controls remain supported with their saved interfaces.
+
 The experimental model lives in `static_agent_training.experimental`. Its default
 experiment now uses an animal-owned sensory apparatus, rather than the earlier
 position/goal byte-slot prototype. The sensory model now uses the shared
@@ -28,7 +34,8 @@ fixed-structure lifetime experiments.
 
 ## Stable boundary across environments
 
-`FixedSenses` fixes an animal's receptor count at construction (256 by default).
+`SignalSenses` fixes the new Agent X layout at construction (16×16 by default).
+Historical `FixedSenses` retains its saved receptor count and contiguous partitions.
 Environments emit arbitrary-length byte stimuli through `StimulusEnvironment`.
 `SensoryAdapter` sends them through that animal's saved, nonlearned transducer.
 The model receives one fixed-width sensory pattern, regardless of environment,
@@ -42,7 +49,8 @@ bottleneck, not a lossless universal representation or a human sensory simulatio
 
 ### Receptors and similar components
 
-The prototype uses `dual-rail-position-fold-or-v1`. Each source bit position
+Signals uses `dual-rail-signal-surface-v1`, sharing the generic conversion of
+historical `dual-rail-position-fold-or-v1`. Each source bit position
 activates one of two receptors, for zero or one. Source bit positions wrap at
 half the receptor count; overlapping activations combine by OR. Both matching
 zeros and matching ones therefore share receptors. Similar components retain
@@ -67,12 +75,15 @@ similar sensory patterns have similar physical meaning.
 
 ### Number-line adapter
 
-`StimulusNumberLine` serializes its current position and goal together as a UTF-8
-JSON array, e.g. `[12,-3]`. Those meanings and serialization belong to the world,
-not to model input slots. The model sees only the generic receptor pattern and
-does not parse JSON or numbers. Larger bounds and longer integer representations
-require no model changes. UTF-8 JSON is an encoding choice whose biases need
-controls; changing the serialization is a changed sensory experience.
+The new `signals` source provides 16 local numeric readings at offsets −8..7,
+independent of apparatus layout: outside 0, normal 64, self 128, and an in-view
+goal 255 when `goal_conditioned`. It supplies no glyphs, absolute coordinates or
+offscreen goal hints. Puzzle worlds supply existing `bytes(board_bits(...))`;
+all sources undergo the same generic dual-rail conversion. Analog digitization
+is the adapter's responsibility; binary receptors are an approximation.
+
+Historical `legacy-bytes` Number Line input retains its position/goal UTF-8 JSON
+serialization. That is a compatibility path, not the new local signals source.
 
 Other worlds can emit text, raw bytes or other serialized measurements through
 the same adapter and saved senses. There is no requirement that they expose a
@@ -194,3 +205,60 @@ structural correction and the next prediction. The sensory model preserves the
 two-stage learning schedule but changes the prediction objective, output-policy
 coupling and shared structural credit assignment. Tooling parity does not imply
 identical learning dynamics. Reproduce with `./project trace-learning`.
+
+## Embedding selection policy
+
+New fixed-sense experiments default to `embedding_selection: argmax`. The sensory
+converter, receptor capacity, embedding softmax, weights and biases are unchanged.
+On each observation the model computes its existing embedding probabilities and
+selects their maximum. Exact equality of probabilities defines a tie: choose
+uniformly from tied pairs, in repertoire order, using the existing embedding RNG's
+`choice` operation. A unique maximum consumes no embedding RNG draw. The native
+selector matches Python's MT19937 `getrandbits` rejection sampling for ties. This
+changes entry selection, not action/prediction sampling, empirical learning or
+delayed structural correction. Structural compatibility still uses softmax
+probabilities, not a winner-take-all surrogate.
+
+Set `--embedding-selection sample` to use the original inverse-CDF weighted
+sampling, including its original RNG consumption. Both evolutionary training and
+the standalone fixed-structure sensory experiments expose `sample`/`argmax`.
+The UI exposes **Embedding selection** for fixed-sense training and starting
+population comparisons. Both arms use the configured policy.
+
+The mode is experiment policy, not a mutated genome weight. It is saved in training
+configuration/checkpoints, generation summaries and per-animal results, and sensory
+model snapshots. New sessions loading old inherited candidates default to argmax
+unless sample is explicitly selected. Frozen saved-population assessments and
+playback use their source policy. Missing modes in historical configurations,
+checkpoints, saved populations and model snapshots resolve to **sample**, so resume
+and replay do not silently switch policies. Historical learning-event trace fixtures
+explicitly retain sample. A resumed evolutionary run retains its saved policy;
+change modes by starting a new experiment, not by overwriting its checkpoint.
+
+This is a deliberate experimental policy change. Compare modes with matched
+starting populations, tasks and seeds; their RNG trajectories will differ by design.
+The unchanged per-animal seed alone does not make the two policies behaviorally
+identical.
+
+## Experimental parallel activation (Agent X)
+
+The single-entry execution described above remains the default. Agent X optionally
+uses fixed contiguous receptor partitions to select multiple independent argmax
+entries into the same repertoire. Each activation keeps its region identity and
+predicts the complete sensory observation. The interface resolves a synchronous
+round of action signals with configurable agreement or plurality voting; conflicts
+or tied votes produce a step-consuming no-op. Delayed structural compatibility
+uses the originating region's features, while empirical predictions retain their
+full-width loss and sequential updates. See [the implementation contract](AGENT_X.md)
+for exact partition, duplicate, arbitration, persistence and baseline behavior.
+
+## Observation-driven arbitrary streams
+
+The same saved receptor bank now exposes bounded, chunk-independent streaming
+input through `ReceptorStream` and an observation-driven `run_stream`. New windows
+arrive independently of actions; all regional predictions are tested against the
+next complete receptor window. `FixedSenses.regions` and `active_features` define
+the content-independent geometry used by the model and visualization. The direct
+folding transducer and existing environment-paced experiments retain their saved
+behavior. See [universal input](UNIVERSAL_INPUT.md) for the exact interface and
+framing contract.

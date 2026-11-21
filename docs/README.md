@@ -6,6 +6,13 @@
 | [Living glossary](JARGON.txt) | Static-agent concepts and related ML terminology |
 | [Project README](../README.md) | Detailed baseline algorithms and options |
 | [Implementation boundaries](IMPLEMENTATION.md) | Existing baseline behavior and attribution limits |
+| [Three-panel switchboard](SWITCHBOARD.md) | Independent panels aligned with parallel sensory regions; matched comparisons |
+| [Receptor signals](RECEPTOR_SIGNALS.md) | Default Agent X binary layout, shared dual-rail conversion and local sensors |
+| [Historical fixed retina](FIXED_RETINA.md) | Packed-pixel drawing retained for snapshot compatibility |
+| [Universal receptor input](UNIVERSAL_INPUT.md) | Generic byte streams, observation-driven processing and shared partitions |
+| [Exploratory structure profile](EXPLORATORY_STRUCTURE.md) | Larger initialization, structural mutation controls and growth metrics |
+| [Agent X parallel activation](AGENT_X.md) | Fixed sensory partitions, independent predictions, agreement and voting |
+| [Lights Out environment](LIGHTS_OUT.md) | Puzzle rules, encodings, tasks and checks |
 | [Baseline environment contract](specs/ENVIRONMENT_INTERFACE.md) | Number-line observations, actions and feedback |
 | [Chain development specification](specs/CHAIN_MERGE_SPEC.md) | Lambda development and budget merging |
 | [Fixed-senses design](AGNOSTIC_INTERFACE.md) | Implemented experimental sensory model |
@@ -35,3 +42,5 @@ the run catalog and saved reports provide the current local evidence.
 The PDFs and baseline specs were moved into these folders during organization;
 their content was preserved. Model hypotheses in the papers are not demonstrated
 merely by having an implementation or passing regression tests.
+
+- [Training performance optimization report](performance/TRAINING_OPTIMIZATION_REPORT.md): measured stage costs, architecture-preserving changes, and validation gates.
