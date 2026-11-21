@@ -1,0 +1,82 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,booktabs}
+\usepackage[hidelinks]{hyperref}
+\usepackage{microtype}
+\usepackage{enumitem}
+\title{Structural Constraints on Catastrophic Forgetting in Continual Learning Agents}
+\author{Ryan MacDonald\\Enluni Labs}
+\date{Working manuscript --- November 2026}
+\begin{document}
+\maketitle
+\begin{abstract}
+Catastrophic forgetting is a central challenge in continual learning: adaptation to new tasks can degrade performance on previously acquired tasks. We investigate whether coherent structural representations can constrain interference during sequential learning. Our working hypothesis is that interference depends on the overlap of activated structural relationships and the compatibility of their empirical updates, rather than task novelty alone. We propose controlled experiments using evolving computational agents with learned continuation distributions and deterministic structural relationships. Agents are trained on an initial task, adapted to a second task, and evaluated on the original task without further learning. We specify retention, adaptation, structural-overlap, and representational-growth measurements, together with controls for evolutionary selection and insufficient learning. This manuscript is a preregistered-style working draft: the proposed experiments have not yet been reported here, and no conclusions are drawn about their outcomes.
+\end{abstract}
+
+\section{Introduction}
+Continual learning concerns the acquisition of new capabilities while retaining earlier ones. Sequential adaptation can cause catastrophic forgetting, particularly when updates to shared representations conflict. Common approaches include replay, regularization, and architectural separation. We examine a different possibility: whether deterministic relationships within coherent representations can themselves constrain the scope of empirical modification.
+
+Our motivating proposal is that learned representations need not be equally susceptible to observations from every task. If empirical updates are mediated by activated structural relationships, structurally distinct tasks may recruit different representations and thereby produce less interference. This is a hypothesis about the actual learning dynamics, not an assumed guarantee of the architecture.
+
+\section{Related Work}
+Relevant literature includes catastrophic forgetting and continual learning, selective plasticity, modular architectures, compositional representations, and automated theory formation. A complete literature review and verified bibliography will be added before submission. In particular, reduced interference due solely to reduced parameter sharing must be distinguished from any effect attributable to logical coherence.
+
+\section{Computational Framework}
+\subsection{Representations and structural continuation}
+The agents under investigation maintain representations associated with term pairs and deterministic structural continuation rules. The same pair is intended to have the same structural continuation wherever it occurs. Empirical continuation distributions are learned and may be shared globally. The exact update rules, activation pathways, mutation operators, and mapping from observations to terms must be documented directly from the implementation before finalizing this section.
+
+\subsection{Structural relevance and interference}
+Let $R$ denote the set of representations and let $a_t(r)$ denote the activation of representation $r$ during task $t$. Let $\Delta_t(r)$ denote its empirical update. A proposed mechanism is that structural compatibility constrains the support and propagation of these updates. The resulting prediction concerns \emph{effective update conflict}, not structural similarity by itself: shared structures receiving compatible updates may exhibit positive transfer rather than forgetting.
+
+\section{Hypotheses}
+\paragraph{H1: Structure-dependent interference.}
+Following training on task A, adaptation to a structurally distinct task B will produce less loss of A performance than adaptation to a related task A$'$ that induces conflicting updates in overlapping representations, provided that B is successfully learned.
+
+\paragraph{H0: No detectable structural shielding.}
+Under matched conditions, retention on A will not improve systematically for structurally distinct B relative to the relevant control conditions.
+
+\paragraph{Secondary hypothesis: Representational expansion.}
+Structurally incompatible tasks may induce additional coherent structures rather than predominantly modifying existing ones. This is a secondary outcome, not an alternative to H1.
+
+\section{Experimental Design}
+\subsection{Tasks}
+Task A is the existing number-line environment. Task A$'$ is a relabeled or shifted variant retaining its relational structure. Task B will be drawn from one or more environments with substantively different transition or relational rules. Task definitions must specify observation and action interfaces, reward functions, and objective criteria for structural overlap. An environment that the agent cannot learn is not an informative test of shielding.
+
+\subsection{Sequential protocol}
+For each random seed:
+\begin{enumerate}[label=\arabic*.]
+\item Train agents on A and save the population and agent-state snapshots.
+\item Measure baseline A performance under a frozen assessment protocol.
+\item Continue adaptation in A, A$'$, or B under matched budgets and selection rules.
+\item Measure adaptation performance on the second task.
+\item Reassess original A without further learning.
+\item Record structural activations, empirical-distribution changes, and counts of coherent structures.
+\end{enumerate}
+Separate experiments should distinguish within-lifetime learning from population-level evolutionary replacement. Controls should include matched training duration, independent seeds, and, where feasible, frozen-learning or frozen-embedding ablations.
+
+\subsection{Outcome measures}
+Let $P_A^{\mathrm{pre}}$ and $P_A^{\mathrm{post}}$ denote frozen-assessment performance before and after second-task adaptation. Define forgetting as
+\begin{equation}
+F_A=P_A^{\mathrm{pre}}-P_A^{\mathrm{post}}.
+\end{equation}
+Also report second-task learning gains, confidence intervals across independent seeds, changes in activation overlap, update conflict, and structural counts. Where baselines differ, report both absolute and normalized retention with the normalization explicitly defined.
+
+\subsection{Preliminary observations}
+Earlier exploratory runs reportedly showed a decrease in A performance from approximately $70\%$ to $40\%$ after adaptation to A$'$. These figures are unverified preliminary observations, not results of the controlled protocol above. They must be reproduced, with configurations and raw data archived, before inclusion in the Results section.
+
+\section{Results}
+\emph{Pending experiments. No results or statistical significance claims are reported in this draft.}
+
+\section{Discussion}
+The central interpretation will depend on whether structurally distinct tasks are learned successfully while preserving A performance, and whether observed retention is attributable to coherent relationships rather than reduced sharing, limited adaptation, or evolutionary selection. A null or negative result would constrain the proposed mechanism but would not uniquely identify its failure mode.
+
+\section{Broader Implications and Limitations}
+If supported, structure-dependent interference could inform approaches to persistent knowledge and continual learning. Autonomous conjecture between independently learned theories and generalization to unobserved relationships are broader motivations, not outcomes established by the retention experiment. Future work must test those capabilities directly.
+
+\section{Reproducibility}
+The final paper will identify repository commit, configurations, task definitions, random seeds, training budgets, evaluation code, and raw results. Deviations from the initial experimental plan will be recorded.
+
+\section{Conclusion}
+This study tests whether coherent structural relationships can regulate interference during sequential learning. The manuscript will be updated with both supporting and refuting evidence as experiments are completed.
+
+\end{document}
