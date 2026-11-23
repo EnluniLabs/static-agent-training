@@ -20,15 +20,28 @@ Status: **Required; implementation pending**. This records the three immediate a
 
 ## 3. Make empirical learning update the actual universal output mapping
 
-**Intended:** empirical error corrects learned signal representations, including signal patterns the environment may interpret as physical actions, without a direct goal-reward/action-policy gradient. Structural error adjusts input/representational mappings to maintain compatibility along coherent transitions.
+**Intended (refined November 22):** empirical error corrects the continuation distribution only when the environment interprets a sampled output as an expectation that can be checked against an observation. A physical-action output causes no immediate empirical or structural correction. Structural error adjusts the deterministic successor's input embedding for compatibility with the original sampled expectation, not with the observed signal. No direct goal-reward/action-policy gradient is introduced.
 
 **Current code:** lifetime empirical learning changes `prediction` logits only. `gates` do not receive lifetime updates. Structural learning modifies `weights` and `bias` for the successor embedding.
 
-**Required:** after correction 2, train the universal output-signal distribution using a precisely specified empirical target and error rule. Do not silently add reinforcement learning of action rewards. Verify that all output-signal dimensions intended to learn actually receive gradients/updates when empirical evidence exists. Keep evolution distinct from within-lifetime learning.
+**Required:** after correction 2, train the universal output-signal distribution using a precisely specified empirical target and error rule for expectation outputs. Do not silently add reinforcement learning of action rewards or empirically update physical-action outputs merely because they occurred. Verify appropriate expectation-output dimensions receive updates when empirical evidence exists. Keep evolution distinct from within-lifetime learning.
 
 ## Structural consistency: preserve and reassess
 
 The existing structural check asks whether a modal predicted sensory frame would select the current pair's fixed successor with probability above a threshold, then increases successor embedding logits if not. This is a local compatibility rule, not full-distribution equality. Its basic principle may be retained, but its inputs and interpretation must be revisited after corrections 1–3. Do not change the structural error rule solely on the assumption that it is already proven wrong.
+
+## 4. Sampled-expectation structural correction and simultaneous error calculation
+
+**Required correction (not an optional hypothesis):** for a deterministic transition `(B,A) -> (C,B)`, let the predecessor sample a concrete output signal `s` from its pre-update continuation distribution. The environment adapter, not the agent's internal architecture, determines whether the emitted signal is an expectation or a physical action.
+
+- **Physical action:** proceed to the deterministic successor without an immediate empirical or structural error update.
+- **Expectation:** obtain the corresponding environmental observation `o`. Calculate empirical error between the sampled expectation `s` and `o`, targeting the predecessor's continuation distribution. Independently calculate structural error from compatibility between the **same original sampled expectation `s`** and the successor's pre-update input embedding.
+- **Snapshot and apply:** calculate both errors using the same pre-update parameter state, then apply the respective corrections. Empirical correction updates the predecessor's continuation distribution; structural correction updates the successor's embedding. Never replace `s` with the observation, a newly sampled prediction, the modal output, or the entire continuation distribution for the structural comparison.
+- **Even if wrong:** an empirically inaccurate sampled expectation still supplies the structural target. This deliberately separates grounding of the continuation distribution in observations from enforcing internal compatibility along coherent lambda transitions.
+
+**Acceptance tests:** verify structural correction uses the exact sampled expectation (not a distribution average or argmax), is unaffected by applying the empirical update, targets the actual deterministic successor, and is skipped for action outputs. Verify empirical and structural corrections use pre-update snapshots, including when the expectation is false. Apply consistently to Python and native CPU paths.
+
+**Interface nuance:** the agent must not contain a hard-coded action-versus-prediction gate. The environment adapter may interpret signals and decide whether a prediction can be evaluated. The precise signaling protocol remains to be designed.
 
 ## Acceptance checks
 
