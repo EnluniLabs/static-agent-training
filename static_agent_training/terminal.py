@@ -49,6 +49,10 @@ class Dashboard:
         phase = status['phase']
         force = phase in ('ready', 'generation-complete', 'finished', 'interrupted')
         if not self.live:
+            if phase == 'evaluating':
+                self.stream.write(f"Generation {status['generation'] + 1}/{self.config.generations}: "
+                                  f"evaluated {status['completed']}/{status['total']} agents\n")
+                self.stream.flush()
             if phase == 'generation-complete':
                 s = status['summary']
                 self.stream.write(f"gen {s['generation'] + 1:4d} | mean {s['mean']:6.1%} | "

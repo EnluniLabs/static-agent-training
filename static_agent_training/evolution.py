@@ -1,6 +1,6 @@
 """One population, fitness tournaments, inherited elites, and offspring mutation."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import random
 import math
 import hashlib
@@ -36,6 +36,7 @@ class TrainingConfig:
     varying_goals: bool = True
     backend: str = "python"
     workers: int = 8
+    reproduction_workers: int = 0
     batch_size: int = 256
     boundary_mode: str = "clamp"
     distance_distribution: str = "uniform"
@@ -49,6 +50,7 @@ class TrainingConfig:
     development: DevelopmentConfig = field(default_factory=DevelopmentConfig)
     learning_config: LearningConfig = field(default_factory=LearningConfig)
     model: str = 'categorical'
+    agent_y: bool = False
     receptors: int = 256
     embedding_selection: str = "argmax"
     sensory_partitions: int = 1
@@ -63,8 +65,14 @@ class TrainingConfig:
 
     def __post_init__(self):
         environment_spec(self.environment)
+        if type(self.reproduction_workers) is not int or self.reproduction_workers < 0:
+            raise ValueError("reproduction_workers must be a nonnegative integer (0 selects automatic)")
         if self.initialization_seed is not None and (type(self.initialization_seed) is not int or self.initialization_seed < 0):
             raise ValueError('initialization seed must be a nonnegative integer')
+        if type(self.agent_y) is not bool:
+            raise ValueError('agent_y must be boolean')
+        if self.agent_y and (self.model != 'senses' or self.embedding_selection != 'argmax'):
+            raise ValueError('Agent Y requires senses and argmax embedding')
         if self.model not in ('categorical', 'senses'):
             raise ValueError('model must be categorical or senses')
         if self.embedding_selection not in ("sample", "argmax"):
@@ -180,6 +188,14 @@ def initialize_population(config, progress=None):
                                   development_seed=derive(initialization_seed, 'initial-development', index),
                                   mapping_seed=derive(initialization_seed, 'initial-mapping', index), config=config.development,
                                   senses=senses))
+        if config.agent_y:
+            from .experimental.agent_y import AgentY
+            from .experimental.sensory_genome import SensoryMappings
+            individual = population[-1]
+            inherited = individual.inherited
+            model = AgentY(individual.repertoire, senses=senses, parameters=inherited.to_parameters())
+            population[-1] = replace(individual, inherited=SensoryMappings(
+                inherited.pair_ids, senses, inherited.parameters, model.router_data()))
         if progress:
             progress(dict(phase='developing', completed=index + 1, total=config.population))
     return population
@@ -355,13 +371,15 @@ def reproduce(population, results, config, generation, progress=None, *, speciat
         children.append(population[parent])
         ancestry.append(dict(kind='elite', parent_index=parent, genotype_id=population[parent].genotype_id))
     rng = random.Random(derive(config.seed, 'selection', generation))
-    while len(children) < config.population:
+    schedule = []
+    for index in range(len(children), config.population):
         competitors = rng.sample(range(len(population)), min(config.tournament_size, len(population)))
         parent = max(competitors, key=lambda i: scores[i])
-        child, log = mutate(population[parent], seed=derive(config.seed, 'mutation', generation, len(children)),
-                            config=config.mutation)
+        schedule.append(dict(index=index, parent_index=parent, competitors=competitors))
+    from .offspring import construct_offspring
+    for job, (child, log) in zip(schedule, construct_offspring(population, schedule, config, generation)):
         children.append(child)
-        ancestry.append(dict(kind='offspring', parent_index=parent, competitors=competitors, mutation=log))
+        ancestry.append(dict(kind='offspring', parent_index=job['parent_index'], competitors=job['competitors'], mutation=log))
         if progress:
             progress(dict(phase='reproducing', generation=generation, completed=len(children), total=config.population))
     if return_speciation:

@@ -1,5 +1,7 @@
 # Separating lifetime learning, selection, and inheritance
 
+Scope: dated measurement, audit or research design; its results and proposals are retained as historical evidence. Current implemented behavior: [architecture reference](ARCHITECTURE.md), reviewed 2026-11-22.
+
 Discussion note, 2026-11-01. This is a plan for later analysis, not authorization
 to launch experiments or change the active benchmark.
 

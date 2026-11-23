@@ -1,0 +1,74 @@
+{
+  "source": "/tmp/offspring-benchmark-large-snapshot.json.gz",
+  "source_bytes": 10785311,
+  "population": 32,
+  "measurements": [
+    {
+      "mode": "baseline",
+      "seconds": 9.51670636201743,
+      "bytes": 15412782,
+      "decoded_sha256": "79968ef4707013ddca61bde86255bbfe8c9d4af164992470328973e968d9f62a"
+    },
+    {
+      "mode": "optimized_cold",
+      "seconds": 1.857954391016392,
+      "bytes": 15745767,
+      "decoded_sha256": "79968ef4707013ddca61bde86255bbfe8c9d4af164992470328973e968d9f62a"
+    },
+    {
+      "mode": "optimized_warm",
+      "seconds": 1.3600021720048971,
+      "bytes": 15745767,
+      "decoded_sha256": "79968ef4707013ddca61bde86255bbfe8c9d4af164992470328973e968d9f62a"
+    },
+    {
+      "mode": "archive.json.gz",
+      "seconds": 3.3561856359883677,
+      "bytes": 3031603,
+      "decoded_sha256": "77e460bfe61d6c4fbea7b7fa24ef14b72a9c62b86a996bb012dc0aa2b6252ae8"
+    },
+    {
+      "mode": "best-population.json.gz",
+      "seconds": 2.851295433996711,
+      "bytes": 4437915,
+      "decoded_sha256": "77e460bfe61d6c4fbea7b7fa24ef14b72a9c62b86a996bb012dc0aa2b6252ae8"
+    }
+  ],
+  "repeat": {
+    "source": "/tmp/offspring-benchmark-large-snapshot.json.gz",
+    "source_bytes": 10785311,
+    "population": 32,
+    "measurements": [
+      {
+        "mode": "baseline",
+        "seconds": 9.523131277004723,
+        "bytes": 15412782,
+        "decoded_sha256": "79968ef4707013ddca61bde86255bbfe8c9d4af164992470328973e968d9f62a"
+      },
+      {
+        "mode": "optimized_cold",
+        "seconds": 1.9159612499934155,
+        "bytes": 15745767,
+        "decoded_sha256": "79968ef4707013ddca61bde86255bbfe8c9d4af164992470328973e968d9f62a"
+      },
+      {
+        "mode": "optimized_warm",
+        "seconds": 1.377082443999825,
+        "bytes": 15745767,
+        "decoded_sha256": "79968ef4707013ddca61bde86255bbfe8c9d4af164992470328973e968d9f62a"
+      },
+      {
+        "mode": "archive.json.gz",
+        "seconds": 3.3713450850045774,
+        "bytes": 3031603,
+        "decoded_sha256": "77e460bfe61d6c4fbea7b7fa24ef14b72a9c62b86a996bb012dc0aa2b6252ae8"
+      },
+      {
+        "mode": "best-population.json.gz",
+        "seconds": 2.8609622530057095,
+        "bytes": 4437915,
+        "decoded_sha256": "77e460bfe61d6c4fbea7b7fa24ef14b72a9c62b86a996bb012dc0aa2b6252ae8"
+      }
+    ]
+  }
+}

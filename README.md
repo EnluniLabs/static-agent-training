@@ -1,5 +1,7 @@
 # Static agent training
 
+Current architecture (reviewed 2026-11-22): [architecture reference](docs/ARCHITECTURE.md). The detailed algorithms below primarily describe the categorical baseline. Agent X uses fixed receptor signals and regional chains; its inputs and learning rules differ.
+
 Start with [USE.md](USE.md) for commands and saved artifacts, or run
 `./project help`. [Documentation map](docs/README.md) separates current behavior,
 experimental designs, audits, and historical results.

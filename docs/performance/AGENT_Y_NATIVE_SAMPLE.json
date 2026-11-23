@@ -1,0 +1,18 @@
+{
+  "agents": 4,
+  "episodes_per_agent": 60,
+  "receptors": 256,
+  "workers": 4,
+  "python_seconds": 6.417346186994109,
+  "passes": [
+    {
+      "pass_number": 1,
+      "native_seconds": 1.1798705109977163
+    },
+    {
+      "pass_number": 2,
+      "native_seconds": 0.20684407799853943
+    }
+  ],
+  "metrics_and_learned_parameters_match": true
+}

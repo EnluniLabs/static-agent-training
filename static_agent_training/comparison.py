@@ -345,6 +345,7 @@ def main():
     parser.add_argument('--benchmark-episodes',type=int,default=2000)
     parser.add_argument('--seeds',type=int,nargs='+',default=[42,43,44])
     parser.add_argument('--backend',choices=['python','native'],default='native')
+    parser.add_argument('--reproduction-workers',type=int,default=0)
     parser.add_argument('--workers',type=int,default=8)
     parser.add_argument('--batch-size',type=int,default=1024)
     parser.add_argument('--speciation-threshold',type=float,default=.6)
@@ -358,7 +359,7 @@ def main():
     directory=args.resume or args.output or ROOT/'runs'/'comparisons'/datetime.now().strftime(args.treatment+'-%Y%m%d-%H%M%S')
     config=TrainingConfig(population=args.population,generations=args.generations,episodes=args.episodes,
                           assessment_episodes=args.assessment_episodes,elites=min(5,args.population-1),
-                          backend=args.backend,workers=args.workers,batch_size=args.batch_size,
+                          backend=args.backend,workers=args.workers,reproduction_workers=args.reproduction_workers,batch_size=args.batch_size,
                           speciation_threshold=args.speciation_threshold,max_species=args.max_species,
                           distance_mean=args.distance_mean,distance_stddev=args.distance_stddev,receptors=(args.receptors if args.receptors is not None else args.retina_width*args.retina_height if args.sensory_interface in ('retina','signals') else 256),sensory_interface=args.sensory_interface,retina_width=args.retina_width,retina_height=args.retina_height,embedding_selection=args.embedding_selection,sensory_partitions=args.sensory_partitions,action_policy=args.action_policy,model=args.model,environment=args.environment,encoding_seed=args.encoding_seed,varying_goals=not args.fixed_goal,
                           learning=not args.no_learning,inherit_lifetime=args.inherit_lifetime,speciation=args.speciation,

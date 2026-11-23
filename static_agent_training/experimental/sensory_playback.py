@@ -24,6 +24,8 @@ def record_episode(model, start, goal, *, encoding_seed=0, boundary_mode='clamp'
             tested=len(feedback),sensory=model.senses.frame(stimulus_payload(raw, model.senses))[0].hex(),
             prediction=prediction.hex() if prediction is not None else None,pair=model.pair,
             **({'active_pairs':[dict(a) for a in model.activations]} if model.sensory_partitions>1 else {})))
+        if hasattr(model, 'router_weights'):
+            frames[-1]['partition'] = model.partition
         batch = next((e for e in reversed(events) if e['kind']=='BATCH_ACTION'), None)
         if batch is not None:
             frames[-1]['action_resolution'] = {k:batch[k] for k in ('policy','action','conflict','counts')}

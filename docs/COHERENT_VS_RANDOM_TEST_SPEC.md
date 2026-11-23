@@ -1,10 +1,12 @@
 # Technical specification: coherent vs arbitrary-node repertoire experiment
 
+Scope: dated measurement, audit or research design; its results and proposals are retained as historical evidence. Current implemented behavior: [architecture reference](ARCHITECTURE.md), reviewed 2026-11-22.
+
 Status: **proposed implementation specification; not yet executed**
 Date: 2026-11-02
 Repository: `EnluniLabs/static-agent-training`
 Priority: central structural hypothesis test
-Related: [future work](../FUTURE_WORK.md), [implementation](IMPLEMENTATION.md), [environment](../ENVIRONMENT_INTERFACE.md), [bias audit](BIAS_AUDIT.md).
+Related: [future work](../FUTURE_WORK.md), [implementation](IMPLEMENTATION.md), [environment](specs/ENVIRONMENT_INTERFACE.md), [bias audit](BIAS_AUDIT.md).
 
 ## 1. Objective and falsifiable claim
 

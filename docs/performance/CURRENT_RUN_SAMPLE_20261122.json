@@ -1,0 +1,160 @@
+{
+  "source": "/home/enluni/projects/static-agent-training/runs/ui-20261122-113151-E3-065d76",
+  "snapshot": {
+    "bytes": 109781296,
+    "sha256": "61d7041ed182485a98bba7456fabb1299ea133952fd17f4e3c2b0676add18917",
+    "source_mtime": 1795370302.8917806
+  },
+  "next_generation": 8,
+  "configuration": {
+    "seed": 48,
+    "population": 32,
+    "generations": 100,
+    "episodes": 100,
+    "assessment_episodes": 200,
+    "elites": 5,
+    "tournament_size": 5,
+    "initial_pairs": 16,
+    "chain_budget": 256,
+    "encoding_seed": 0,
+    "learning": true,
+    "inherit_lifetime": false,
+    "varying_goals": true,
+    "backend": "native",
+    "workers": 4,
+    "reproduction_workers": 0,
+    "batch_size": 256,
+    "boundary_mode": "clamp",
+    "distance_distribution": "uniform",
+    "include_zero": true,
+    "distance_mean": 10.0,
+    "distance_stddev": 5.0,
+    "speciation": false,
+    "speciation_threshold": 0.6,
+    "max_species": 16,
+    "mutation": {
+      "weight_probability": 0.8,
+      "subtree_probability": 0.35,
+      "term_probability": 0.2,
+      "insertion_probability": 0.25,
+      "deletion_probability": 0.02,
+      "weight_stddev": 0.1,
+      "max_depth": 10,
+      "max_nodes": 127,
+      "combinator_probability": 0.15,
+      "new_pair_budget": 256,
+      "attempts": 32
+    },
+    "development": {
+      "max_nodes": 2048,
+      "max_transitions": 2000
+    },
+    "learning_config": {
+      "prediction_rate": 0.05,
+      "embedding_rate": 0.05,
+      "compatibility_threshold": 0.1
+    },
+    "model": "senses",
+    "receptors": 256,
+    "embedding_selection": "argmax",
+    "sensory_partitions": 4,
+    "sensory_interface": "signals",
+    "retina_width": 16,
+    "retina_height": 16,
+    "action_policy": "vote",
+    "environment": "lights-out-2x2",
+    "initial_population": "/home/enluni/projects/static-agent-training/runs/populations/20261122-111813-72858909.json.gz",
+    "population_save_count": 10,
+    "initialization_seed": null
+  },
+  "timings_seconds": {
+    "checkpoint_decode": 5.0023887470015325,
+    "nested_agent_restore": 5.94629073899705,
+    "nested_restore_identity_warm": 2.3362809249956626,
+    "metadata_write": 0.0008373410091735423,
+    "nested_pack": 0.18663249700330198,
+    "nested_native_phase": 1.5920619950047694,
+    "nested_champion_reference": 4.196307327976683,
+    "evaluation": 6.164970572019229,
+    "nested_read_candidates": 2.06540620198939,
+    "best_candidates_write": 15.881483329023467,
+    "best_candidates": 20.62914220400853,
+    "reproduction": 6.542865044000791,
+    "generation_record_write": 0.28999862901400775,
+    "champion_trace_write": 3.209640198008856,
+    "checkpoint_write": 38.209671384014655
+  },
+  "calls": {
+    "checkpoint_decode": 1,
+    "nested_agent_restore": 52,
+    "nested_restore_identity_warm": 32,
+    "metadata_write": 3,
+    "nested_pack": 1,
+    "nested_native_phase": 2,
+    "nested_champion_reference": 1,
+    "evaluation": 1,
+    "nested_read_candidates": 1,
+    "best_candidates_write": 1,
+    "best_candidates": 1,
+    "reproduction": 1,
+    "generation_record_write": 1,
+    "champion_trace_write": 1,
+    "checkpoint_write": 1
+  },
+  "generation_seconds": 75.50899117800873,
+  "wall_seconds": 87.28146576881409,
+  "peak_main_rss_mib": 2403.4765625,
+  "status": "completed",
+  "initial_population_id": "1dbd6d7a3cbc6fd7fa8ceae653e988f00e094bc5f2791185d16dfc7f4f22045f",
+  "output_checkpoint_bytes": 110093234,
+  "validation": {
+    "generation_record_matches_live": true,
+    "generation_record_sha256": "2780a274d281ceb529864404934daec977926c535e6ab7878db4f981f309585c",
+    "live_generation_record_sha256": "2780a274d281ceb529864404934daec977926c535e6ab7878db4f981f309585c"
+  },
+  "live_sample": {
+    "duration_seconds": 40.00776433944702,
+    "trainer_pid": 143337,
+    "viewer_pid": 143043,
+    "resources": {
+      "trainer": {
+        "mean_cpu_cores": 1.1140337565939589,
+        "min_rss_mib": 1384.13671875,
+        "max_rss_mib": 2191.296875
+      },
+      "viewer": {
+        "mean_cpu_cores": 0.7733498862243009,
+        "min_rss_mib": 860.4765625,
+        "max_rss_mib": 2075.64453125
+      }
+    },
+    "pressure": {
+      "cpu": "some avg10=0.00 avg60=0.00 avg300=0.00 total=61251216\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n",
+      "memory": "some avg10=0.00 avg60=0.00 avg300=0.00 total=0\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n",
+      "io": "some avg10=0.00 avg60=0.00 avg300=0.00 total=24518863\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=24460709\n"
+    },
+    "recent_generation_intervals": [
+      {
+        "previous": "00004.json",
+        "current": "00005.json",
+        "seconds": 70.77998471260071
+      },
+      {
+        "previous": "00005.json",
+        "current": "00006.json",
+        "seconds": 72.57198667526245
+      },
+      {
+        "previous": "00006.json",
+        "current": "00007.json",
+        "seconds": 74.79998421669006
+      },
+      {
+        "previous": "00007.json",
+        "current": "00008.json",
+        "seconds": 74.63198375701904
+      }
+    ]
+  },
+  "working_source_sha256": "7bda57e63f161a6a14eb5439ffb27a3609558853055e472dd5938570acdcdbab"
+}

@@ -1,0 +1,23 @@
+[
+  {
+    "workers": 1,
+    "seconds": 6.351222766999854,
+    "agents": 4,
+    "episodes_per_agent": 60,
+    "identical_results": true
+  },
+  {
+    "workers": 2,
+    "seconds": 3.8802942679903936,
+    "agents": 4,
+    "episodes_per_agent": 60,
+    "identical_results": true
+  },
+  {
+    "workers": 4,
+    "seconds": 1.9954071670072153,
+    "agents": 4,
+    "episodes_per_agent": 60,
+    "identical_results": true
+  }
+]

@@ -1,5 +1,7 @@
 # Fixed-Sense Error Propagation Audit
 
+Scope: dated measurement, audit or research design; its results and proposals are retained as historical evidence. Current implemented behavior: [architecture reference](../ARCHITECTURE.md), reviewed 2026-11-22.
+
 Audited commit: `594951dc7de4687c5e2539ea6f3a881f59189416`.
 Executed 2026-11-03 UTC (2026-11-02 America/Chicago).
 

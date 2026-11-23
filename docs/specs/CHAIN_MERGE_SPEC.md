@@ -1,5 +1,7 @@
 # Chain intersections, equivalence, and mergers
 
+Current system context and model boundaries: [architecture reference](../ARCHITECTURE.md), reviewed 2026-11-22.
+
 Status: analysis specification supplementing the three supplied papers.
 
 Implemented execution policy (updated by user decision): exact ordered-pair

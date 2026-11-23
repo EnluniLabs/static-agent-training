@@ -125,13 +125,16 @@ def reproduce(population, results, config, generation, previous=None, progress=N
     schedule=[g['id'] for g in groups for _ in range(g['offspring'])]
     if len(groups)>1:
         rng.shuffle(schedule)
+    jobs=[]
     for identity in schedule:
         members=lookup[identity]['members']
         competitors=rng.sample(members,min(config.tournament_size,len(members)))
         parent=max(competitors,key=lambda i:scores[i])
-        child,log=mutate(population[parent],seed=derive(config.seed,'mutation',generation,len(children)),config=config.mutation)
+        jobs.append(dict(index=len(children)+len(jobs),parent_index=parent,competitors=competitors,species_id=identity))
+    from .offspring import construct_offspring
+    for job,(child,log) in zip(jobs,construct_offspring(population,jobs,config,generation)):
         children.append(child)
-        ancestry.append(dict(kind='offspring',parent_index=parent,competitors=competitors,mutation=log,species_id=identity))
+        ancestry.append(dict(kind='offspring',parent_index=job['parent_index'],competitors=job['competitors'],mutation=log,species_id=job['species_id']))
         if progress:
             progress(dict(phase='reproducing',generation=generation,completed=len(children),total=len(population)))
     report.update(enabled=True,count=len(groups),threshold=config.speciation_threshold,limit=limit,

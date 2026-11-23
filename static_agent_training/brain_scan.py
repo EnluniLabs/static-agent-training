@@ -4,7 +4,7 @@ from .experimental.bit_model import sigmoid
 from .experimental.senses import receptor_regions
 
 
-def mapping_graph(repertoire, *, parameters=None, mappings=None, sensory_partitions=None, senses=None):
+def mapping_graph(repertoire, *, parameters=None, mappings=None, sensory_partitions=None, senses=None, learned_grouping=False, partition=None):
     if sensory_partitions is None:
         sensory_partitions = getattr(senses, 'partitions', None) or 1
     nodes, edges = [], []
@@ -23,22 +23,26 @@ def mapping_graph(repertoire, *, parameters=None, mappings=None, sensory_partiti
         edges.append(dict(source=source, target=target, value=1, kind='successor', measure='structural'))
     if parameters is not None:
         retina = senses is not None and getattr(senses, 'width', None) is not None
-        if senses is not None and hasattr(senses, 'partition_indices'):
+        if learned_grouping:
+            indices = partition or ()
+        elif senses is not None and hasattr(senses, 'partition_indices'):
             indices = senses.partition_indices(sensory_partitions)
         else:
             indices = [range(start, end) for start, end in
                        receptor_regions(len(parameters['weights']) - 1, sensory_partitions)]
+        if learned_grouping:
+            indices = partition or ()
         regions = {pixel + 1: region for region, pixels in enumerate(indices) for pixel in pixels}
         for i, row in enumerate(parameters['weights']):
             key = f'input:{i}'
             if retina and i > 0:
                 x, y = (i - 1) % senses.width, (i - 1) // senses.width
-                region = regions[i]
+                region = regions.get(i)
                 label = f'Pixel {x},{y}' if senses.interface == 'retina' else f'Receptor {i-1} · layout {x},{y}'
-                node(key, f'{label} · region {region}', 'input', region=region, pixel=[x, y])
+                node(key, f'{label} · '+(f'region {region}' if region is not None else 'learned grouping'), 'input', region=region, pixel=[x, y])
             elif sensory_partitions > 1 or retina:
                 region = regions.get(i)
-                label = 'Presence · shared across regions' if i == 0 else f'Region {region} · receptor {i-1}'
+                label = 'Presence · shared across regions' if i == 0 else (f'Region {region} · receptor {i-1}' if region is not None else f'Receptor {i-1} · learned grouping')
                 node(key, label, 'input', region=region)
             else:
                 node(key, f'Input feature {i}', 'input')
@@ -77,6 +81,9 @@ def mapping_graph(repertoire, *, parameters=None, mappings=None, sensory_partiti
     graph = dict(nodes=nodes, edges=edges, connection_limit=4)
     if senses is not None:
         graph['sensory_geometry'] = sensory_geometry(senses, sensory_partitions)
+        if learned_grouping:
+            graph['sensory_geometry']['scheme'] = 'learned-variable-groups'
+            graph['partition'] = partition
     return graph
 
 

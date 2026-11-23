@@ -1,5 +1,7 @@
 # Faster training while preserving the studied architecture
 
+Scope: dated measurement, audit or research design; its results and proposals are retained as historical evidence. Current implemented behavior: [architecture reference](../ARCHITECTURE.md), reviewed 2026-11-22.
+
 Reviewed 2026-11-05 UTC (2026-11-04 America/Chicago). Base commit:
 `34f34ac594cedce66ed716d35041f959b079b854`, with the current uncommitted puzzle
 implementation. This is a report and an isolated measurement, not an optimization

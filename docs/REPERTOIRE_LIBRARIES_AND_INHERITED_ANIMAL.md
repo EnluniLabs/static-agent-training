@@ -1,5 +1,7 @@
 # Repertoire Libraries: Building the Inherited Animal Before Universal Explanation
 
+Scope: dated measurement, audit or research design; its results and proposals are retained as historical evidence. Current implemented behavior: [architecture reference](ARCHITECTURE.md), reviewed 2026-11-22.
+
 **Research idea — November 2, 2026.** Conceptual proposal and experimental roadmap, not an established result. Related: *The Coherence Engine*, *The Universal Explainer*, *Universal Explanation Before Cumulative Innovation*, `docs/THREE_CORE_EXPERIMENTS.md`, and `docs/COHERENT_VS_RANDOM_TEST_SPEC.md`.
 
 ## 1. The original bottleneck

@@ -1,5 +1,7 @@
 # Training environment and agent interface
 
+Current architecture (reviewed 2026-11-22): [architecture reference](../ARCHITECTURE.md). The coordinate-token contract below describes the categorical baseline. Signals Agent X instead receives local numeric sensor bytes through its fixed receptors, with no absolute-coordinate or offscreen-goal channel.
+
 New training runs use the varying-goal interface. The environment shows the
 current number and the requested target separately, for example `obs_+12` and
 `goal_-3`. The `Observation.goal` field carries the target token alongside

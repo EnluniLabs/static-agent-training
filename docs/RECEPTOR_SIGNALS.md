@@ -1,5 +1,7 @@
 # Receptor signals
 
+Current system context and model boundaries: [architecture reference](ARCHITECTURE.md), reviewed 2026-11-22.
+
 New Agent X sessions default to `signals`, implemented by `SignalSenses`. This is
 an immutable binary receptor apparatus, not a drawing image or camera. Width,
 height, partition scheme and partition count belong to the agent and persist

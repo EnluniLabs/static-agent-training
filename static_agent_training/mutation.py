@@ -6,7 +6,7 @@ from . import serialization as json
 import math
 import random
 
-from .genome import Species, reconcile_mappings
+from .genome import Species, _mergers, reconcile_mappings
 from .initialize import Config, depth, generate_term, is_closed, node_count, pair_id
 from .mappings import InheritedMappings
 from .repertoire import Repertoire
@@ -67,33 +67,9 @@ def _replace(term, path, replacement):
     return tuple(parts)
 
 
-def _mergers(development):
-    """Describe mergers by initial-pair identities, independent of list indices."""
-    seeds = [pair_id(*p) for p in development['initial_pairs']]
-    return {(e['pair_id'], tuple(sorted(seeds[i] for i in e['sources'])))
-            for e in development['events'] if e['kind'] == 'MERGE'}
-
-
-def mutate(parent, *, seed, config=None):
-    """Return (offspring, log), never changing the parent or using lifetime weights.
-
-    Independent operator draws; fixed order: subtree, term, insert, delete,
-    redevelopment/reconciliation, then weight noise. No crossover.
-    """
-    if not isinstance(parent, Species):
-        raise TypeError('mutation requires an inherited Species')
-    config = config or MutationConfig()
-    if any(depth(t) > config.max_depth or node_count(t) > config.max_nodes
-           for p in parent.initial_pairs for t in p):
-        raise ValueError('parent starting terms exceed mutation limits')
-    purposes = ('operators', 'subtree', 'term', 'insert', 'delete', 'development', 'mapping', 'weights')
-    seeds = {purpose: _seed(seed, purpose) for purpose in purposes}
-    draw = random.Random(seeds['operators'])
-    selected = {name: draw.random() < probability for name, probability in (
-        ('weights', config.weight_probability), ('subtree', config.subtree_probability),
-        ('term', config.term_probability), ('insert', config.insertion_probability),
-        ('delete', config.deletion_probability))}
-    pairs, budgets, operations = list(parent.initial_pairs), list(parent.budgets), []
+def mutate_seed_pairs(initial_pairs, initial_budgets, *, config, selected, seeds):
+    """Apply structural operators independently of repertoire orientation."""
+    pairs, budgets, operations = list(initial_pairs), list(initial_budgets), []
     generator = config.generator
     for name in ('subtree', 'term'):
         if not selected[name]:
@@ -136,8 +112,32 @@ def mutate(parent, *, seed, config=None):
             operations.append(dict(operator='delete', index=index, pair_id=pair_id(*pair),
                                    budget=budget, changed=True))
 
+    return pairs, budgets, operations
+
+
+def mutate(parent, *, seed, config=None):
+    """Return (offspring, log), never changing the parent or using lifetime weights.
+
+    Independent operator draws; fixed order: subtree, term, insert, delete,
+    redevelopment/reconciliation, then weight noise. No crossover.
+    """
+    if not isinstance(parent, Species):
+        raise TypeError('mutation requires an inherited Species')
+    config = config or MutationConfig()
+    if any(depth(t) > config.max_depth or node_count(t) > config.max_nodes
+           for p in parent.initial_pairs for t in p):
+        raise ValueError('parent starting terms exceed mutation limits')
+    purposes = ('operators', 'subtree', 'term', 'insert', 'delete', 'development', 'mapping', 'weights')
+    seeds = {purpose: _seed(seed, purpose) for purpose in purposes}
+    draw = random.Random(seeds['operators'])
+    selected = {name: draw.random() < probability for name, probability in (
+        ('weights', config.weight_probability), ('subtree', config.subtree_probability),
+        ('term', config.term_probability), ('insert', config.insertion_probability),
+        ('delete', config.deletion_probability))}
+    pairs, budgets, operations = mutate_seed_pairs(
+        parent.initial_pairs, parent.budgets, config=config, selected=selected, seeds=seeds)
+
     structural_changed = tuple(pairs) != parent.initial_pairs or tuple(budgets) != parent.budgets
-    old_development = json.loads(parent.development_json)
     if structural_changed:
         from .engine import run
         development = run(pairs, budgets, seed=seeds['development'], **asdict(parent.development_config))
@@ -146,7 +146,7 @@ def mutate(parent, *, seed, config=None):
         development_json = json.dumps(development, sort_keys=True)
     else:
         repertoire, inherited = parent.repertoire, parent.inherited
-        development, development_json = old_development, parent.development_json
+        development_json = parent.development_json
 
     weight_count = 0
     if selected['weights'] and isinstance(inherited, InheritedMappings):
@@ -166,7 +166,10 @@ def mutate(parent, *, seed, config=None):
     child = Species(tuple(pairs), tuple(budgets), inherited, repertoire,
                     parent.development_config, development_json)
     before, after = set(parent.repertoire.pairs), set(repertoire.pairs)
-    old_mergers, new_mergers = _mergers(old_development), _mergers(development)
+    if structural_changed:
+        old_mergers, new_mergers = parent._merger_identities, _mergers(development)
+    else:
+        old_mergers = new_mergers = frozenset()
     log = dict(schema_version='crt-mutation-v1', seed=seed, streams=seeds,
                config=asdict(config), parent_id=parent.genotype_id, offspring_id=child.genotype_id,
                selected=selected, operations=operations, structural_changed=structural_changed,

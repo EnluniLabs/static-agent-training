@@ -1,5 +1,7 @@
 # Comparison with the GitHub signal-interface notes
 
+Scope: dated measurement, audit or research design; its results and proposals are retained as historical evidence. Current implemented behavior: [architecture reference](ARCHITECTURE.md), reviewed 2026-11-22.
+
 Reviewed 2026-11-02 against `FUTURE_WORK.md` on GitHub, section
 "Proposed type-agnostic signal interface and generalization filter", content blob
 `7d39a11bfa80d23bd880d6cbaacc4f8e847427e5`, and the user's subsequent clarification:

@@ -295,6 +295,9 @@ class BitModel:
 
     @classmethod
     def from_data(cls, data):
+        if data['schema_version'] == 'crt-agent-y-v3':
+            from .agent_y import AgentY
+            return AgentY.from_data(data)
         if data['schema_version'] != 'crt-bit-model-v1':
             raise ValueError('unsupported experimental model')
         senses = FixedSenses.from_data(data['senses']) if data.get('senses') is not None else None

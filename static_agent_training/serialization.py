@@ -2,6 +2,22 @@
 
 import json
 import re
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class EncodedJSON:
+    """Validated immutable JSON fragment for streaming artifact writes only.
+
+    Construction validates with the stack-safe reader. Ordinary strings remain
+    quoted strings; only this explicit wrapper is emitted as JSON by dump().
+    """
+    document: str
+
+    def __post_init__(self):
+        if not isinstance(self.document, str):
+            raise TypeError('encoded JSON requires text')
+        loads(self.document)
 
 
 def dumps(value, *, sort_keys=False, separators=None, indent=None):
@@ -23,6 +39,9 @@ def _iterencode(value, *, sort_keys=False, separators=None, indent=None):
             yield item
         elif kind == 'end':
             active.remove(item)
+        elif isinstance(item, EncodedJSON):
+            for offset in range(0, len(item.document), 65536):
+                yield item.document[offset:offset + 65536]
         elif isinstance(item, (dict, list, tuple)):
             identity = id(item)
             if identity in active:
@@ -55,8 +74,18 @@ def dump(value, handle, **kwargs):
     if kwargs.get('indent') is not None:
         handle.write(dumps(value, **kwargs))
     else:
+        # Bounded batches avoid a TextIO/gzip write for every scalar or bracket.
+        # Keep iterative encoding so deeply developed terms remain stack-safe.
+        chunks, size = [], 0
         for chunk in _iterencode(value, **kwargs):
-            handle.write(chunk)
+            chunks.append(chunk)
+            size += len(chunk)
+            if size >= 65536:
+                handle.write(''.join(chunks))
+                chunks.clear()
+                size = 0
+        if chunks:
+            handle.write(''.join(chunks))
 
 
 _WHITESPACE = re.compile(r'[ \t\n\r]*')

@@ -1,5 +1,7 @@
 # Experiment record
 
+Scope: dated measurement, audit or research design; its results and proposals are retained as historical evidence. Current implemented behavior: [architecture reference](ARCHITECTURE.md), reviewed 2026-11-22.
+
 This is a dated historical record. Use `./project runs`, `./project status`, and
 `./project show RUN` for current local artifacts and process status; see
 [USE.md](../USE.md). Pending/running descriptions below reflect when they were

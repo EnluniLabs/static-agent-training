@@ -2,6 +2,8 @@
 
 | Document | Purpose |
 |---|---|
+| [Agent Y](AGENT_Y.md) | Learned receptor grouping conditioned on full input over shared embeddings |
+| [Current architecture](ARCHITECTURE.md) | Model boundaries, receptor flow, evolution, CPU execution, caching and persistence |
 | [USE.md](../USE.md) | Command guide, run tracking, artifacts and cleanup |
 | [Living glossary](JARGON.txt) | Static-agent concepts and related ML terminology |
 | [Project README](../README.md) | Detailed baseline algorithms and options |
@@ -44,3 +46,15 @@ their content was preserved. Model hypotheses in the papers are not demonstrated
 merely by having an implementation or passing regression tests.
 
 - [Training performance optimization report](performance/TRAINING_OPTIMIZATION_REPORT.md): measured stage costs, architecture-preserving changes, and validation gates.
+- [Checkpoint save speed](performance/CHECKPOINT_SAVE_SPEED.md): measured compression and buffered-writing improvements with identical saved content.
+
+- [Genome caches and offspring speed](performance/GENOME_AND_OFFSPRING_SPEED.md): immutable caching, bounded parallel reproduction, reproducibility, and measured tradeoffs.
+
+- [Current E3 training benchmark](performance/CURRENT_RUN_BENCHMARK_20261122.md): a live-run snapshot replay and per-stage timing breakdown.
+- [Safe save optimization](performance/SAFE_SAVE_OPTIMIZATION.md): validated provenance streaming, candidate compression, parity checks and measured tradeoffs.
+
+- [Agent Y parallel evaluation](performance/AGENT_Y_PARALLEL.md): measured worker scaling, deterministic results and per-generation progress.
+
+- [Agent Y native CPU](performance/AGENT_Y_NATIVE.md): compiled grouping and learning, Python parity and evaluator migration.
+
+- [Workspace polling performance](performance/WORKSPACE_POLLING.md): metadata-only caches and avoiding full-model loads during discovery.

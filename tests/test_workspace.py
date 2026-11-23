@@ -196,6 +196,42 @@ class WorkspaceTests(unittest.TestCase):
             process.wait.assert_called_once()
             self.assertFalse(manager.children)
 
+    def test_current_model_family_metadata_keeps_legacy_runs_readable(self):
+        from dataclasses import asdict
+        from static_agent_training.evolution import TrainingConfig
+        from static_agent_training.experiment import write_json
+        for name, settings in [('categorical', {}),
+                ('old-fixed', dict(model='senses')),
+                ('agent-x', dict(model='senses',sensory_interface='signals',sensory_partitions=4)),
+                ('agent-y', dict(model='senses',agent_y=True))]:
+            config=TrainingConfig(**settings)
+            write_json(self.root/'runs'/name/'config.json',dict(config=asdict(config)))
+        self.server.RequestHandlerClass.workspace.invalidate()
+        rows={r['run']:r for r in self.get('/api/runs')}
+        self.assertNotIn('model_family',rows['categorical'])
+        self.assertNotIn('model_family',rows['old-fixed'])
+        self.assertEqual(rows['agent-x']['model_family'],'agent-x')
+        self.assertEqual(rows['agent-y']['model_family'],'agent-y')
+
+    def test_agent_y_session_resume_and_playback(self):
+        job = self.post('/api/sessions', dict(kind='sensory-training', name='Agent Y fixture',
+            config=dict(agent_y=True, backend='python', population=2, generations=1,
+                episodes=1, assessment_episodes=1, receptors=16, sensory_partitions=2,
+                initial_pairs=2, chain_budget=8, inherit_lifetime=True)))
+        path = Path(job['directory'])
+        self.wait_for(lambda: (path/'generations/00000.json').is_file())
+        self.wait_for(lambda: next((r for r in self.get('/api/runs')
+            if r['run']==job['run'] and r['state']=='completed'), None))
+        detail = self.get('/api/run?' + urlencode(dict(run=job['run'])))
+        self.assertTrue(detail['config']['agent_y'])
+        snapshots = self.get('/api/models?' + urlencode(dict(run=job['run'], model='senses')))
+        self.assertTrue(snapshots[0]['agent_y'])
+        played = self.post('/api/attempt', dict(snapshot=snapshots[0]['id'], start=12, goal=-3, seed=42))
+        self.assertEqual(played['model'], 'senses')
+        self.post('/api/resume-run', dict(run=job['run'], generations=2, backend='native'))
+        self.wait_for(lambda: (path/'generations/00001.json').is_file())
+        self.assertEqual(self.get('/api/run?' + urlencode(dict(run=job['run'])))['config']['backend'], 'native')
+
     def test_sensory_generation_sessions_checkpoint_resume_and_playback(self):
         job = self.post('/api/sessions', dict(kind='sensory-training', name='sensory evolution fixture',
                          config=dict(population=2, generations=2, episodes=1, assessment_episodes=1, receptors=256)))

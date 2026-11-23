@@ -56,6 +56,14 @@ class Workspace:
                     rows.append(dict(name=job['name'], path=job['directory'], run=job['run'], kind=job['kind'],
                                      state=job['state'], updated=job['created'], progress=None, summary=None, session=job))
                     known.add(job['directory'])
+            for row in rows:
+                if row['kind'] == 'sensory-training':
+                    saved = read_json(Path(row['path']) / 'config.json').get('config', {})
+                    settings = saved or row.get('session', {}).get('config', {})
+                    if settings.get('agent_y'):
+                        row['model_family'] = 'agent-y'
+                    elif settings.get('sensory_partitions', 1) > 1 or settings.get('sensory_interface') == 'signals':
+                        row['model_family'] = 'agent-x'
             rows.sort(key=lambda row: (row['state'] in ('running', 'stopping', 'finishing'), row['updated']), reverse=True)
             self.cached = (now, rows)
             return rows
@@ -68,6 +76,7 @@ class Workspace:
             result['run_metadata'] = metadata
         result['run'] = relative
         result['series'] = []
+        result['evaluation_progress'] = read_json(directory / 'progress.json')
         if (directory / 'config.json').is_file():
             result['kind'] = 'sensory-training' if result.get('config', {}).get('model') == 'senses' else 'training'
             result['chart'] = dict(x='Generation', series=[['mean', 'Mean training'], ['assessment_mean', 'Mean held-out'], ['best', 'Best training'], ['random_assessment', 'Random']])
@@ -183,7 +192,7 @@ class Workspace:
         elif route == '/api/resume':
             result = self.sessions.resume(data.get('id'), data.get('generations'))
         elif route == '/api/resume-run':
-            result = self.sessions.resume_run(data.get('run'), data.get('generations'))
+            result = self.sessions.resume_run(data.get('run'), data.get('generations'), data.get('backend'))
         elif route == '/api/reset-lifetime':
             return self.models.reset_lifetime(data)
         elif route == '/api/stream-preview':

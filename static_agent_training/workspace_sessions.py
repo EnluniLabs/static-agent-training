@@ -196,11 +196,13 @@ class SessionManager:
         if kind in (*TRAINING, *COMPARISONS, 'interfaces'):
             allowed |= {'population', 'memory_limit_mb'}
         if kind in (*TRAINING, *COMPARISONS):
-            allowed |= {'generations', 'backend', 'workers', 'batch_size', 'environment'} | STRUCTURE_KEYS
+            allowed |= {'generations', 'backend', 'workers', 'reproduction_workers', 'batch_size', 'environment'} | STRUCTURE_KEYS
         if kind in (*TRAINING,'starting-population-benchmark'):
             allowed |= {'learning', 'inherit_lifetime', 'speciation', 'champion_count', 'initial_population', 'population_save_count'}
         if kind in ('senses', 'sensory-training', 'model-comparison'):
             allowed |= {'receptors', 'embedding_selection'}
+        if kind == 'sensory-training':
+            allowed |= {'agent_y'}
         if kind in ('senses', 'sensory-training', *COMPARISONS):
             allowed |= {'sensory_partitions', 'action_policy'}
         if kind in ('sensory-training', *COMPARISONS):
@@ -213,6 +215,9 @@ class SessionManager:
             allowed |= {'seeds', 'treatment', 'benchmark_episodes', 'model', 'receptors', 'embedding_selection'}
         if kind == 'starting-population-benchmark':
             allowed |= {'population_a','population_b'}
+        if config.get('agent_y'):
+            if kind != 'sensory-training' or not boolean(config, 'agent_y', False):
+                raise ValueError('Agent Y requires sensory evolutionary training')
         if set(config) - allowed:
             raise ValueError('Unsupported settings: ' + ', '.join(sorted(set(config) - allowed)))
         notes = config.get('notes', '')
@@ -236,6 +241,7 @@ class SessionManager:
                 raise ValueError('Unknown evaluator backend')
             args += ['--generations', str(integer(config, 'generations', 50)), '--backend', backend,
                      '--workers', str(integer(config, 'workers', 4, 1, 1024)),
+                     '--reproduction-workers', str(integer(config, 'reproduction_workers', 0, 0, 1024)),
                      '--batch-size', str(integer(config, 'batch_size', 256))]
         if kind in TRAINING:
             args += ['--population-save-count',str(integer(config,'population_save_count',10))]
@@ -245,12 +251,14 @@ class SessionManager:
                 source = self.population_path(config['initial_population'])
                 saved = read_population(source)
                 imported = saved['config']
-                validate_compatibility(saved,TrainingConfig(model='senses' if kind=='sensory-training' else 'categorical',
+                validate_compatibility(saved,TrainingConfig(model='senses' if kind=='sensory-training' else 'categorical', agent_y=config.get('agent_y',False),
                     environment=environment,**sensory_apparatus(config),
                     varying_goals=imported.get('varying_goals',False),encoding_seed=imported.get('encoding_seed',0)),allow_new_environment=True)
                 args += ['--initial-population',str(source),'--encoding-seed',str(imported.get('encoding_seed',0))]
                 if not imported.get('varying_goals',False):args.append('--fixed-goal')
             args += ['--model', 'senses' if kind == 'sensory-training' else 'categorical']
+            if boolean(config, 'agent_y', False):
+                args.append('--agent-y')
             args += ['--elites', str(min(5, config.get('population', 32) - 1)), '--no-live',
                      '--champion-count', str(integer(config, 'champion_count', 10))]
             if not boolean(config, 'learning', True):
@@ -406,7 +414,7 @@ class SessionManager:
             write_json(self.registry / f'{identifier}.json', record)
             return record
 
-    def resume(self, identifier, generations=None):
+    def resume(self, identifier, generations=None, backend=None):
         with self.lock:
             record = self.get(identifier)
             if record['state'] in ('running', 'stopping'):
@@ -423,6 +431,11 @@ class SessionManager:
             if not (directory / required[kind]).is_file():
                 raise ValueError('This session has not saved a resumable checkpoint yet')
             args = ['--resume', str(directory)]
+            if backend is not None:
+                if backend != 'native' or not record['config'].get('agent_y'):
+                    raise ValueError('Only Agent Y can migrate to native on resume')
+                args += ['--backend', 'native']
+                record = dict(record, config=dict(record['config'], backend='native'))
             if kind in TRAINING:
                 args.append('--no-live')
                 args += ['--champion-count', str(record['config'].get('champion_count', 10))]
@@ -440,13 +453,13 @@ class SessionManager:
             args += ['--memory-limit-mb', str(record['config'].get('memory_limit_mb', 4096))]
             return self.spawn(kind, directory, args, name=record['name'], config=record['config'], previous=identifier)
 
-    def resume_run(self, relative, generations=None):
+    def resume_run(self, relative, generations=None, backend=None):
         """Adopt a saved resumable run, without taking ownership of a live process."""
         with self.lock:
             directory = self.path(relative)
             owned = next((r for r in self.records() if r['directory'] == str(directory)), None)
             if owned:
-                return self.resume(owned['id'], generations)
+                return self.resume(owned['id'], generations, backend)
             if (directory / 'config.json').is_file():
                 from .status import training_processes
                 if str(directory) in training_processes():
@@ -466,6 +479,11 @@ class SessionManager:
                     raise ValueError('Choose a larger generation target to extend completed training')
                 args = ['--resume', str(directory), '--no-live', '--champion-count',
                         str(read_json(directory / 'champions.json').get('count', 10))]
+                if backend is not None:
+                    if backend != 'native' or not config.get('agent_y'):
+                        raise ValueError('Only Agent Y can migrate to native on resume')
+                    args += ['--backend', 'native']
+                    config = dict(config, backend='native')
                 if generations is not None:
                     args += ['--generations', str(generations)]
             else:

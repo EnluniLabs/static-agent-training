@@ -1,5 +1,7 @@
 # Switchboard
 
+Current system context and model boundaries: [architecture reference](ARCHITECTURE.md), reviewed 2026-11-22.
+
 New Agent X sessions default to the immutable `signals` interface described in
 [Receptor signals](RECEPTOR_SIGNALS.md): a 16×16 layout of 256 binary receptors,
 four fixed tiles, and one shared generic dual-rail byte transducer for all sources.

@@ -31,8 +31,8 @@ def block(model, tasks, *, learn, encoding_seed, boundary_mode="clamp", goal_con
         updates = Counter(e['kind'] for e in events)
         counts.update(updates)
         episodes.append(dict(start=start, goal=goal, success=final.success, reason=final.reason,
-                             outputs=updates['ACTION_SIGNAL' if model.sensory_partitions > 1 else 'ACTION'] + updates['EXPECTATION'],
-                             actions=updates['BATCH_ACTION' if model.sensory_partitions > 1 else 'ACTION'],
+                             outputs=(updates['ACTION_SIGNAL'] + updates['ACTION']) + updates['EXPECTATION'],
+                             actions=(updates['BATCH_ACTION'] + updates['ACTION']),
                              expectations=updates['EXPECTATION'], tested=len(feedback),
                              correct=sum(e['correct'] for e in feedback),
                              loss_sum=sum(e['prediction_nll'] for e in feedback),
@@ -44,10 +44,12 @@ def block(model, tasks, *, learn, encoding_seed, boundary_mode="clamp", goal_con
                 expectations=counts['EXPECTATION'], tested=tested, correct=correct,
                 prediction_accuracy=correct / tested if tested else None,
                 prediction_nll=sum(e['loss_sum'] for e in episodes) / tested if tested else None,
+                **(dict(partition_groups=[e['groups'] for e in model.events if e['kind']=='PARTITION_SELECT'])
+                   if hasattr(model, 'router_weights') else {}),
                 expired=counts['EXPIRED'], empirical_updates=counts['EMPIRICAL_UPDATE'], conflicts=counts['CONFLICT'])
 
 
-def evaluate(individual, training_tasks, assessment_tasks, *, seed, config, sensory_partitions=None, action_policy=None):
+def evaluate(individual, training_tasks, assessment_tasks, *, seed, config, sensory_partitions=None, action_policy=None, capture_detail=True):
     sensory_partitions = config.sensory_partitions if sensory_partitions is None else sensory_partitions
     action_policy = config.action_policy if action_policy is None else action_policy
     inherited = individual.inherited
@@ -59,10 +61,11 @@ def evaluate(individual, training_tasks, assessment_tasks, *, seed, config, sens
     model.output_rng = random.Random(derive(seed, 'training', 'output'))
     training = block(model, training_tasks, learn=config.learning, encoding_seed=config.encoding_seed,
                      boundary_mode=config.boundary_mode, goal_conditioned=config.varying_goals, environment=config.environment)
+    if not capture_detail:
+        model.events.clear()
     learned = model.to_data()
-    assessor = BitModel(individual.repertoire, senses=inherited.senses, parameters=model.parameters(),
-                        seed=seed, learning_config=config.learning_config, embedding_selection=config.embedding_selection,
-                        sensory_partitions=sensory_partitions, action_policy=action_policy)
+    assessor = BitModel.from_data(learned)
+    assessor.events.clear()
     assessor.embedding_rng = random.Random(derive(seed, 'assessment', 'embedding'))
     assessor.output_rng = random.Random(derive(seed, 'assessment', 'output'))
     assessment = block(assessor, assessment_tasks, learn=False, encoding_seed=config.encoding_seed,
@@ -71,9 +74,11 @@ def evaluate(individual, training_tasks, assessment_tasks, *, seed, config, sens
                   repertoire_size=len(individual.repertoire.pairs), successor_count=len(individual.repertoire.successors),
                   model='senses', embedding_selection=config.embedding_selection,
                   sensory_partitions=sensory_partitions, action_policy=action_policy)
-    detail = dict(learned_model=learned, assessment_events=assessor.events)
+    if config.agent_y:
+        result['agent_y'] = True
+    detail = dict(learned_model=learned, assessment_events=assessor.events) if capture_detail else None
     reproductive = replace(individual, inherited=SensoryMappings(inherited.pair_ids, inherited.senses,
-                                                                 model.parameters())) if config.inherit_lifetime else None
+                                                                 model.parameters(), model.router_data() if config.agent_y else None)) if config.inherit_lifetime else None
     return result, detail, reproductive
 
 
@@ -85,7 +90,21 @@ def evaluate_generation(population, config, generation, split, progress=None, *,
     results, champion, champion_detail = [], 0, None
     lifetime_population = [] if config.inherit_lifetime else None
     accelerated = None
-    if config.backend != 'python':
+    if config.agent_y and config.backend == 'native':
+        from .agent_y_accelerated import evaluate_batch as y_batch
+        accelerated = []
+        for first in range(0, len(population), config.batch_size):
+            batch = population[first:first + config.batch_size]
+            rows, reproductive = y_batch(batch, train_starts, test_starts, train_goals, test_goals,
+                seeds=[derive(config.seed, 'evaluation', generation, i) for i in range(first,first+len(batch))], config=config)
+            accelerated.extend(rows)
+            if config.inherit_lifetime:
+                lifetime_population.extend(reproductive)
+            if progress:
+                scores = [r['training']['fitness'] for r in accelerated]
+                progress(dict(phase='evaluating',generation=generation,completed=len(scores),
+                    total=len(population),mean=sum(scores)/len(scores),best=max(scores)))
+    elif config.backend != 'python':
         from .sensory_accelerated import evaluate_batch, learned_mappings
         accelerated = []
         for first in range(0, len(population), config.batch_size):
@@ -107,8 +126,17 @@ def evaluate_generation(population, config, generation, split, progress=None, *,
                 values = [r['training']['fitness'] for r in accelerated]
                 progress(dict(phase='evaluating', generation=generation, completed=len(values),
                               total=len(population), mean=sum(values)/len(values), best=max(values)))
+    parallel = None
+    if config.agent_y and config.backend == 'python' and config.workers > 1 and len(population) > 1:
+        from .sensory_parallel import evaluate_population
+        parallel = evaluate_population(population, config, generation, training_tasks, assessment_tasks)
     for index, individual in enumerate(population):
-        if accelerated is None:
+        if parallel is not None:
+            result, reproductive = next(parallel)
+            detail = None
+            if config.inherit_lifetime:
+                lifetime_population.append(reproductive)
+        elif accelerated is None:
             result, detail, reproductive = evaluate(individual, training_tasks, assessment_tasks,
                         seed=derive(config.seed, 'evaluation', generation, index), config=config)
             if config.inherit_lifetime:
@@ -123,7 +151,10 @@ def evaluate_generation(population, config, generation, split, progress=None, *,
             values = [r['training']['fitness'] for r in results]
             progress(dict(phase='evaluating', generation=generation, completed=index + 1,
                           total=len(population), mean=sum(values) / len(values), best=max(values)))
-    if accelerated is not None:
+    if parallel is not None:
+        # Exhaust the generator so its process pool closes before reproduction.
+        next(parallel, None)
+    if accelerated is not None or parallel is not None:
         from ..accelerated import assert_equivalent
         reference, champion_detail, _ = evaluate(population[champion], training_tasks, assessment_tasks,
             seed=derive(config.seed, 'evaluation', generation, champion), config=config)

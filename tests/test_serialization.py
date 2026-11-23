@@ -1,9 +1,11 @@
 """Regression coverage for deep development terms in checkpoint JSON."""
+import gzip
 import io
 import json
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -22,6 +24,53 @@ def deep_term():
 
 
 class SerializationTests(unittest.TestCase):
+    def test_encoded_development_preserves_deep_data_and_validates(self):
+        from dataclasses import replace
+        species = develop([(I, I)], ['obs'], ['out'], budgets=0)
+        development = serialization.loads(species.development_json)
+        development['extra'] = {'term': deep_term(), 'text': 'λ "quoted"'}
+        species = replace(species, development_json=serialization.dumps(development))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / CHECKPOINT
+            state = dict(schema_version='crt-training-v1', z_after_population=42)
+            write_json(path, state, population=[species])
+            loaded = load_checkpoint(directory)
+            restored = Species.from_data(loaded['population'][0])
+            self.assertEqual(restored.genotype_id, species.genotype_id)
+            self.assertEqual(loaded['z_after_population'], 42)
+            # Compare stack-safe canonical encodings, not recursive equality.
+            self.assertEqual(serialization.dumps(restored.to_data(), sort_keys=True),
+                             serialization.dumps(species.to_data(), sort_keys=True))
+            self.assertIs(species._encoded_development, species._encoded_development)
+            before = path.read_bytes()
+            broken = replace(species, development_json='{} , "injected": true')
+            with self.assertRaises(ValueError):
+                write_json(path, state, population=[broken])
+            self.assertEqual(path.read_bytes(), before)
+            changed = replace(species, development_json='{}')
+            self.assertEqual(changed._encoded_development.document, '{}')
+
+    def test_candidate_compression_preserves_contents(self):
+        with tempfile.TemporaryDirectory() as directory:
+            payload = {'text': 'abc' * 10000}
+            for name in ('best-population.json.gz', 'archive.json.gz'):
+                path = Path(directory) / name
+                write_json(path, payload)
+                self.assertEqual(serialization.loads(gzip.decompress(path.read_bytes())), payload)
+
+    def test_sync_and_replace_failures_preserve_previous_checkpoint(self):
+        species = develop([(I, I)], ['obs'], ['out'], budgets=0)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / CHECKPOINT
+            write_json(path, {'schema_version': 'crt-training-v1'}, population=[species])
+            before = path.read_bytes()
+            for operation in ('fsync', 'replace'):
+                with patch('static_agent_training.experiment.os.' + operation,
+                           side_effect=OSError('simulated save failure')):
+                    with self.assertRaises(OSError):
+                        write_json(path, {'next_generation': 1}, population=[species])
+                self.assertEqual(path.read_bytes(), before)
+
     def test_shallow_compatibility(self):
         data = {'z': [None, True, False, 4, 1.5, 'λ\n"'], 'a': {'x': []}}
         for kwargs in ({}, {'sort_keys': True, 'separators': (',', ':')}, {'indent': 2}):
@@ -144,3 +193,20 @@ class SerializationTests(unittest.TestCase):
                 write_json(path, {'term': deep_term(), 'unsupported': object()})
             self.assertEqual(path.read_bytes(), before)
             self.assertEqual(load_checkpoint(directory), state)
+
+    def test_streamed_checkpoint_preserves_format_and_previous_save(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / CHECKPOINT
+            state = dict(schema_version='crt-training-v1', next_generation=14)
+            payload = [{'term': deep_term()}, {'term': I}]
+            population = [SimpleNamespace(to_data=lambda data=data: data) for data in payload]
+            write_json(path, state | {'population': payload})
+            before = path.read_bytes()
+            write_json(path, state, population=iter(population))
+            self.assertEqual(gzip.decompress(path.read_bytes()), gzip.decompress(before))
+
+            before = path.read_bytes()
+            broken = SimpleNamespace(to_data=lambda: object())
+            with self.assertRaises(TypeError):
+                write_json(path, state, population=iter([*population, broken]))
+            self.assertEqual(path.read_bytes(), before)

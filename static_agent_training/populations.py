@@ -7,6 +7,8 @@ import hashlib
 from . import serialization as json
 from pathlib import Path
 import statistics
+import threading
+from functools import lru_cache
 
 from .environments import environment_spec, categorical_world
 from .genome import Species
@@ -51,7 +53,7 @@ def update_best(directory, population, results, config, generation):
         selected.add(identity)
         previous = rows.get(identity)
         if previous is None or result['training']['fitness'] > previous['training_fitness']:
-            rows[identity] = dict(individual=animal.to_data(), training_fitness=result['training']['fitness'],
+            rows[identity] = dict(individual=animal.to_data(encoded_development=True), training_fitness=result['training']['fitness'],
                 assessment_fitness=result['assessment']['fitness'], generation=generation, index=result['index'])
         if len(selected) >= config.population_save_count:
             break
@@ -98,22 +100,39 @@ def save_population(directory, output, *, count=10, name=None):
     return dict(path=str(output.resolve()),name=data['name'],count=len(data['members']),source_type=data['source_type'])
 
 
+_population_summary_lock = threading.RLock()
+
+
+@lru_cache(maxsize=256)
+def _population_summary(filename, device, inode, modified, changed, size):
+    # Cache only this small row, never genomes, decoded histories or mappings.
+    data = read_population(filename)
+    config = data['config']
+    return dict(name=data['name'],count=len(data['members']),
+        model=config.get('model','categorical'),agent_y=config.get('agent_y',False),
+        receptors=config.get('receptors',256),sensory_interface=config.get('sensory_interface','legacy-bytes'),
+        retina_width=config.get('retina_width',16),retina_height=config.get('retina_height',16),
+        sensory_partitions=config.get('sensory_partitions',1),action_policy=config.get('action_policy','agreement'),
+        environment=config.get('environment','original'),source_type=data['source_type'])
+
+
 def list_populations(root):
+    root = Path(root).resolve()
     rows = []
-    for path in sorted((Path(root)/'runs/populations').glob('*.json.gz')):
-        data = read_population(path)
-        config = data['config']
-        rows.append(dict(id=path.relative_to(Path(root)/'runs').as_posix(),name=data['name'],count=len(data['members']),
-            model=config.get('model','categorical'),receptors=config.get('receptors',256),
-            sensory_interface=config.get('sensory_interface','legacy-bytes'),
-            retina_width=config.get('retina_width',16),retina_height=config.get('retina_height',16),
-            sensory_partitions=config.get('sensory_partitions',1),action_policy=config.get('action_policy','agreement'),
-            environment=config.get('environment','original'),source_type=data['source_type']))
+    # Concurrent browser polls must not all decode the same large cold archive.
+    with _population_summary_lock:
+        for path in sorted((root/'runs/populations').glob('*.json.gz')):
+            stat = path.stat()
+            summary = _population_summary(str(path),stat.st_dev,stat.st_ino,
+                stat.st_mtime_ns,stat.st_ctime_ns,stat.st_size)
+            rows.append(dict(summary,id=path.relative_to(root/'runs').as_posix()))
     return rows
 
 
 def validate_compatibility(data, config, *, allow_new_environment=False):
     source = data['config']
+    if source.get('agent_y', False) != getattr(config, 'agent_y', False):
+        raise ValueError('Saved population and session must use the same Agent X/Y architecture')
     if source.get('model','categorical') != config.model:
         raise ValueError('Saved population and new session must use the same model')
     if source.get('encoding_seed',0) != config.encoding_seed:
@@ -208,7 +227,7 @@ def benchmark_populations(paths, output, *, environment='original', episodes=100
         random_assessment=random_task_mean(assess,assess_goals,**spec.baseline_kwargs),populations=[])
     write_json(output/'report.json',report)
     for path,data in zip(paths,populations):
-        cfg = replace(config,model=data['config'].get('model','categorical'),**sensory_apparatus(data['config']),
+        cfg = replace(config,model=data['config'].get('model','categorical'),agent_y=data['config'].get('agent_y',False),**sensory_apparatus(data['config']),
                       encoding_seed=data['config'].get('encoding_seed',0),embedding_selection=data['config'].get('embedding_selection','sample'),
                       action_policy=data['config'].get('action_policy','agreement'))
         validate_compatibility(data,cfg)

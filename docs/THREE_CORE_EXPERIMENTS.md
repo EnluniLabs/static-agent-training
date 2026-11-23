@@ -1,5 +1,7 @@
 # Three central experiments: coherence, continuous learning, and exploratory knowledge
 
+Scope: dated measurement, audit or research design; its results and proposals are retained as historical evidence. Current implemented behavior: [architecture reference](ARCHITECTURE.md), reviewed 2026-11-22.
+
 Status: research plan — **not implemented or executed**
 Date: 2026-11-02
 

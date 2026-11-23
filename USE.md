@@ -1,5 +1,7 @@
 # Using this project
 
+Current architecture (reviewed 2026-11-22): [architecture reference](docs/ARCHITECTURE.md). Commands retain saved model settings on resume. Workspace Agent X defaults and low-level API defaults differ; choose the sensory interface explicitly for reproducible comparisons.
+
 Use `./project` for the command menu. It selects `.venv/bin/python` when present
 and resolves relative paths from the project root, even when invoked elsewhere.
 Opening the menu or asking for help starts no experiment. The older `./train`,
@@ -611,8 +613,11 @@ Rankings are descriptive scores on the saved tasks, not significance estimates.
 In **Animal playground**, select a saved snapshot and expand **3D brain scan**.
 Click **Load / refresh mappings**, drag to rotate, scroll to zoom, and click a node
 for exact displayed connection values. The layout has two folded hemispheres, a
-sensory input bank and output signal terminals. The cortical outline is a visual
-guide; only the dots and colored links represent agent nodes and mappings. Filter input mappings, repertoire successor
+sensory input bank and output signal terminals. The repertoire fills the brain
+outline; nodes exchange positions to shorten displayed connections, prioritizing
+stronger links without shrinking the occupied shape. Input and output banks stay
+fixed; the solved layout is reused while rotating or replaying.
+The cortical outline is a visual guide; only the dots and colored links represent agent nodes and mappings. Filter input mappings, repertoire successor
 links, output policy, or prediction bits. Arrowheads on selected connections show
 direction; red sensory connections have negative weights. State inspection includes
 its complete pair ID and, for sensory models, its embedding bias.
@@ -744,3 +749,55 @@ their seed terms/budgets, while their offspring use the selected mutation settin
 Existing runs and resumes retain their saved parameters. Under session details,
 choose **Track → Structural growth** to inspect developed states, convergence
 points and seed-term sizes. See [the profile and validation details](docs/EXPLORATORY_STRUCTURE.md).
+
+
+## Genome caches and parallel offspring development
+
+Inherited genome IDs and native parameter sources are cached on immutable genome
+objects. Mutations and inherited lifetime updates create new objects and fresh
+caches. Native source arrays are read-only; each lifetime gets writable copies.
+
+**Offspring processes** controls reproduction separately from **CPU workers** for
+evaluation. `0` (default) selects a conservative automatic policy, `1` forces
+serial construction, and a larger integer requests that many processes, bounded
+by available CPUs and the number of children. Automatic mode stays serial for
+small jobs and uses up to four processes for larger sensory generations, no more
+than the evaluator worker setting. It is a workload heuristic, not a guarantee
+that parallelism is faster for every population.
+
+```sh
+./project train --model senses --sensory-interface signals --sensory-partitions 4 \
+  --backend native --workers 4 --reproduction-workers 4
+```
+
+Parent selection and child seeds are fixed before dispatch. Children and mutation
+logs are collected in their original order, including with speciation and lifetime
+inheritance. Process transport supports deep developed terms. A running trainer
+uses these changes only when next started or resumed; existing jobs are not
+restarted automatically. See [measured results](docs/performance/GENOME_AND_OFFSPRING_SPEED.md).
+
+
+## Agent Y: learned sensory grouping
+
+Choose **Agent Y · learned sensory partitions** in the session creator. Agent Y
+learns receptor membership conditioned on the full signal, then uses shared
+signal-to-pair weights with argmax. Both receptor membership and group count are learned. Native CPU evaluation
+is selected by default; workers parallelize independent lifetimes. Python remains
+available as the reference evaluator. Completed-agent progress appears during evaluation. Checkpoints, mutation, candidate export
+and import preserve the router. Enable lifetime inheritance to pass learned router
+changes to offspring. Saved champions open in the playground.
+
+```sh
+./project train --model senses --agent-y --backend native --sensory-interface signals
+```
+
+See [Agent Y](docs/AGENT_Y.md) for learning rules and limitations.
+
+
+## Workspace model choices
+
+The workspace creator and playground expose only Agent X and Agent Y. The session
+library hides older categorical and standalone fixed-senses models, and candidate
+choices show current sensory families. Saved historical files and compatibility
+loaders remain intact; no existing run or model artifact is deleted by this UI
+change. Agent X uses fixed groups; Agent Y learns grouping and group count.

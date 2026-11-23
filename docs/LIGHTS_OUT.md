@@ -1,5 +1,7 @@
 # Lights Out environment
 
+Current system context and model boundaries: [architecture reference](ARCHITECTURE.md), reviewed 2026-11-22.
+
 Select **Lights Out · 3×3 puzzle** in training setup, starting-population
 benchmarks, frozen assessments or the playground. CLI identifier: `lights-out`.
 Both categorical and fixed-senses models support Python reference and native CPU

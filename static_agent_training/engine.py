@@ -33,7 +33,7 @@ class _Execution:
     path: list = field(default_factory=list)
 
 
-def run(pairs, budgets, *, seed=0, max_nodes=256, max_transitions=1000):
+def run(pairs, budgets, *, seed=0, max_nodes=256, max_transitions=1000, function_first=False):
     """Develop one or more pairs with pooled budgets at exact pair junctions.
 
     `budgets` is either a per-start integer or a sequence of integers. Cycles
@@ -107,7 +107,8 @@ def run(pairs, budgets, *, seed=0, max_nodes=256, max_transitions=1000):
                 e.status = 'DEPTH'
                 continue
             if e.expression is None:
-                e.expression = ('app', e.pair[1], e.pair[0])
+                f, x = e.pair if function_first else e.pair[::-1]
+                e.expression = ('app', f, x)
             if node_count(e.expression) > max_nodes:
                 e.status = 'SIZE'
                 continue
@@ -127,7 +128,7 @@ def run(pairs, budgets, *, seed=0, max_nodes=256, max_transitions=1000):
                 positions = tuple(redexes(e.expression))
             if not positions:
                 pid = pair_id(*e.pair)
-                successor = (e.pair[1], e.expression)
+                successor = (e.expression, e.pair[0]) if function_first else (e.pair[1], e.expression)
                 known = successors.setdefault(pid, successor)
                 if known != successor:
                     raise RuntimeError('successful normal forms disagree')
@@ -151,7 +152,10 @@ def run(pairs, budgets, *, seed=0, max_nodes=256, max_transitions=1000):
                 config=dict(max_nodes=max_nodes, max_transitions=max_transitions),
                 initial_pairs=pairs, initial_budgets=budgets, groups=groups,
                 events=events, accounting=dict(initial=initial, spent=spent, remaining=remaining))
-    result['repertoire'] = Repertoire.from_development(result).to_data()
+    if function_first:
+        result['schema_version'] = 'crt-engine-function-first-v1'
+    else:
+        result['repertoire'] = Repertoire.from_development(result).to_data()
     return result
 
 

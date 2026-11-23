@@ -65,6 +65,25 @@ def _frames(senses, goal_conditioned, environment="original"):
 # Public source-frame cache uses the same source selection as the adapter.
 native_frames = _frames
 
+def _packed_sources(inherited):
+    """Keep read-only sources with their immutable mappings, never a batch."""
+    cached = getattr(inherited, '_packed_numpy_sources', None)
+    if cached is None:
+        np = _numpy()
+        parameters = inherited.parameters
+        ids = inherited.pair_ids
+        values = (parameters['bias'], parameters['weights'],
+                  tuple(parameters['gates'][q] for q in ids),
+                  tuple(parameters['prediction'][q][0] for q in ids))
+        # Immutable bytes backing also prevents callers re-enabling writes.
+        def readonly(value):
+            array = np.asarray(value, dtype=np.float64)
+            return np.frombuffer(array.tobytes(), dtype=np.float64).reshape(array.shape)
+        cached = tuple(readonly(value) for value in values)
+        object.__setattr__(inherited, '_packed_numpy_sources', cached)
+    return cached
+
+
 def _pack(population, encoding_seed, goal_conditioned, environment="original"):
     np = _numpy()
     senses = population[0].inherited.senses
@@ -80,10 +99,10 @@ def _pack(population, encoding_seed, goal_conditioned, environment="original"):
         if inherited.senses != senses:
             raise ValueError('A sensory batch must share its fixed sensory capacity')
         ids = inherited.pair_ids; lookup = {q:j for j,q in enumerate(ids)}; n = len(ids); sizes[i] = n
-        parameters = inherited.to_parameters()
-        bias[i,:n] = parameters['bias']; weights[i,:,:n] = parameters['weights']
+        source_bias, source_weights, source_gates, source_prediction = _packed_sources(inherited)
+        bias[i,:n] = source_bias; weights[i,:,:n] = source_weights
+        gates[i,:n] = source_gates; prediction[i,:n] = source_prediction
         for j,q in enumerate(ids):
-            gates[i,j] = parameters['gates'][q]; prediction[i,j] = parameters['prediction'][q][0]
             edges[i,j] = lookup.get(individual.repertoire.successors.get(q), -1)
     moves = np.asarray(stimulus_world(environment,encoding_seed=encoding_seed).moves, dtype=np.int32)
     arrays = [bias, weights, gates, prediction, edges, sizes, _frames(senses, goal_conditioned, environment), moves]
@@ -162,6 +181,8 @@ def _result(metrics, starts, goals):
 
 def learned_mappings(individual, arrays, index):
     from .sensory_genome import SensoryMappings
+    if arrays and hasattr(arrays[0], 'inherited'):
+        return arrays[index].inherited
     ids = individual.inherited.pair_ids; n = len(ids)
     return SensoryMappings(ids, individual.inherited.senses, dict(
         bias=arrays[0][index,:n].tolist(),weights=arrays[1][index,:,:n].tolist(),
@@ -174,6 +195,16 @@ def evaluate_batch(population, training_starts, assessment_starts, *, seeds, enc
                    backend='native', workers=8, return_weights=False, boundary_mode='clamp', goal_conditioned=True, environment="original", embedding_selection="argmax", sensory_partitions=1, action_policy="agreement"):
     from ..learning import LearningConfig
     spec = environment_spec(environment)
+    if any(getattr(p.inherited, 'router', None) is not None for p in population):
+        from .agent_y_accelerated import evaluate_batch as y_batch, adapter_config
+        config=adapter_config(population,backend=backend,workers=workers,environment=environment,
+            boundary_mode=boundary_mode,goal_conditioned=goal_conditioned,
+            embedding_selection=embedding_selection,sensory_partitions=sensory_partitions,
+            action_policy=action_policy,encoding_seed=encoding_seed,learning=learning,
+            learning_config=learning_config,return_weights=return_weights)
+        rows,parents=y_batch(population,training_starts,assessment_starts,training_goals,
+                            assessment_goals,seeds=seeds,config=config)
+        return (rows,parents) if return_weights else rows
     if not population or len(population)!=len(seeds) or not training_starts or not assessment_starts:
         raise ValueError('require nonempty populations, seeds and tasks')
     if type(workers) is not int or workers<1 or boundary_mode not in ('clamp','terminate'):
@@ -219,6 +250,15 @@ def evaluate_frozen(population, starts, goals, *, seeds, encoding_seed=0, backen
         np = _numpy()
         frames = arrays[6].reshape(41,41,-1)
         arrays[6] = np.ascontiguousarray(frames[:,[goal_permutation.get(g,g)-spec.lower for g in spec.positions],:])
+    if any(getattr(p.inherited, 'router', None) is not None for p in population):
+        from .agent_y_accelerated import adapter_config, router_arrays, _phase as y_phase
+        config=adapter_config(population,backend=backend,workers=workers,environment=environment,
+            boundary_mode=boundary_mode,goal_conditioned=goal_conditioned,
+            embedding_selection=embedding_selection,sensory_partitions=sensory_partitions,
+            action_policy=action_policy,encoding_seed=encoding_seed,learning=False)
+        metrics,_=y_phase(arrays,router_arrays(population),seeds,starts,goals,
+                          phase='assessment',learning=False,config=config)
+        return [_result(row,starts,goals) for row in metrics]
     metrics = _phase(arrays,seeds,starts,goals,phase='assessment',learning=False,
         learning_config=LearningConfig(),backend=backend,workers=workers,boundary_mode=boundary_mode,environment=environment,embedding_selection=embedding_selection,sensory_partitions=sensory_partitions,action_policy=action_policy)
     return [_result(row,starts,goals) for row in metrics]

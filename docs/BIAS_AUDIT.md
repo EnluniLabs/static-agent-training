@@ -1,5 +1,7 @@
 # Bias and attribution audit
 
+Scope: dated measurement, audit or research design; its results and proposals are retained as historical evidence. Current implemented behavior: [architecture reference](ARCHITECTURE.md), reviewed 2026-11-22.
+
 Recorded 2026-11-01. This audit reads saved artifacts and evaluates isolated copies.
 It does not modify the live run, its inherited population, or its learning rules.
 

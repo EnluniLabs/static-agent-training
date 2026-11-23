@@ -163,9 +163,12 @@ class CandidateStore:
                 if key in self.cache:
                     self.cache.move_to_end(key)
                     return self.cache[key]
+                # Avoid retaining many complete development histories in the UI.
+                while len(self.cache) >= 2:
+                    self.cache.popitem(last=False)
                 bundle = load_saved_candidate(directory, generation)
                 self.cache[key] = bundle
-                while len(self.cache) > 16:
+                while len(self.cache) > 2:
                     self.cache.popitem(last=False)
                 return bundle
         except (OSError, ValueError, KeyError) as error:

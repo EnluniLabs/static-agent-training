@@ -18,17 +18,47 @@ from .structure_profiles import STRUCTURE_ARGUMENTS, add_structure_arguments, ap
 CHECKPOINT = 'checkpoint.json.gz'
 
 
-def write_json(path, data):
+def _dump_json(data, handle, population):
+    options = dict(sort_keys=True, separators=(',', ':'))
+    if population is None:
+        json.dump(data, handle, **options)
+        return
+
+    # Keep the population array in the existing schema without materializing
+    # every agent's serialized data at once.
+    handle.write('{')
+    for index, key in enumerate(sorted((*data, 'population'))):
+        if index:
+            handle.write(',')
+        handle.write(json.dumps(key) + ':')
+        if key == 'population':
+            handle.write('[')
+            for agent_index, agent in enumerate(population):
+                if agent_index:
+                    handle.write(',')
+                agent_data = (agent.to_data(encoded_development=True) if isinstance(agent, Species)
+                              else agent.to_data())
+                json.dump(agent_data, handle, **options)
+            handle.write(']')
+        else:
+            json.dump(data[key], handle, **options)
+    handle.write('}')
+
+
+def write_json(path, data, *, population=None):
     """Replace a complete file atomically; interrupted writes preserve its predecessor."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + '.tmp')
     if str(path).endswith('.gz'):
-        with gzip.open(temporary, 'wt', encoding='utf-8') as handle:
-            json.dump(data, handle, sort_keys=True, separators=(',', ':'))
+        # Checkpoints and the candidate collection are replaced each generation;
+        # prioritize save latency. Named exports retain archival compression.
+        level = 1 if path.name in (CHECKPOINT, 'best-population.json.gz') else 9
+        with gzip.open(temporary, 'wt', encoding='utf-8', compresslevel=level) as handle:
+            _dump_json(data, handle, population)
     else:
         with temporary.open('w', encoding='utf-8') as handle:
-            json.dump(data, handle, sort_keys=True, separators=(',', ':'))
+            _dump_json(data, handle, population)
             handle.write('\n')
     # gzip must close before syncing so its trailer is included.
     with temporary.open('rb') as handle:
@@ -94,12 +124,13 @@ def update_champion_collection(directory, count=10, record=None):
     return collection
 
 
-def run_experiment(config, directory, *, resume=False, until_generation=None, progress=None, champion_count=10):
+def run_experiment(config, directory, *, resume=False, until_generation=None, progress=None, champion_count=10, return_state=True):
     """Checkpoint the next inherited population after every completed generation.
 
     All random streams derive from saved seed and generation/individual indices,
     so replay needs no mutable global RNG state. Interrupted generations rerun.
     `until_generation` allows a bounded segment without changing experiment config.
+    Set `return_state=False` when the caller only needs the on-disk checkpoint.
     """
     directory = Path(directory)
     if type(champion_count) is not int or champion_count < 1:
@@ -112,7 +143,12 @@ def run_experiment(config, directory, *, resume=False, until_generation=None, pr
             backend_migration = dict(previous_backend='cuda', current_backend='native',
                                      resumed_at_generation=state['next_generation'])
         saved = TrainingConfig.from_data(state['config'])
-        if replace(config, generations=saved.generations) != saved:
+        comparison = replace(config, generations=saved.generations)
+        if saved.agent_y and saved.backend == 'python' and config.backend == 'native':
+            comparison = replace(comparison, backend='python')
+            backend_migration = dict(previous_backend='python', current_backend='native',
+                                     resumed_at_generation=state['next_generation'])
+        if comparison != saved:
             raise ValueError('resume must retain the saved experiment configuration')
         if config.generations < state['next_generation']:
             raise ValueError('requested generations precede the checkpoint')
@@ -122,6 +158,8 @@ def run_experiment(config, directory, *, resume=False, until_generation=None, pr
             raise ValueError('inconsistent checkpoint population or history')
         if state['config'] != asdict(config):
             state['config'] = asdict(config)
+            if backend_migration:
+                state['backend_migration'] = backend_migration
             write_json(directory / CHECKPOINT, state)
     else:
         if directory.exists() and any(directory.iterdir()):
@@ -130,8 +168,8 @@ def run_experiment(config, directory, *, resume=False, until_generation=None, pr
         population = initialize_population(config, progress)
         history, split, first = [], partitions(config.seed, include_zero=config.include_zero and config.varying_goals, environment=config.environment), 0
         state = dict(schema_version='crt-training-v1', config=asdict(config), next_generation=0,
-                     history=history, partitions=split, population=[p.to_data() for p in population])
-        write_json(directory / CHECKPOINT, state)
+                     history=history, partitions=split)
+        write_json(directory / CHECKPOINT, state, population=population)
     speciation_state = state.get('speciation_state')
     if config.initial_population and not resume:
         from .populations import read_population
@@ -174,23 +212,25 @@ def run_experiment(config, directory, *, resume=False, until_generation=None, pr
         history.append(record['summary'])
         write_json(directory / 'generations' / f'{generation:05d}.json', record)
         write_json(directory / 'traces' / f'{generation:05d}-champion.json.gz',
-                   dict(generation=generation, individual=champion.to_data(),
+                   dict(generation=generation, individual=champion.to_data(encoded_development=True),
                         result=record['individuals'][record['champion_index']], **detail))
         update_champion_collection(directory, champion_count, record)
         state = dict(schema_version='crt-training-v1', config=asdict(config), next_generation=generation + 1,
-                     history=history, partitions=split, population=[p.to_data() for p in next_population], speciation_state=speciation_state)
+                     history=history, partitions=split, speciation_state=speciation_state)
         if backend_migration:
             state['backend_migration'] = backend_migration
-        write_json(directory / CHECKPOINT, state)
+        write_json(directory / CHECKPOINT, state, population=next_population)
         population = next_population
-        # Release the old serialized population and episode logs before the next
-        # evaluation constructs its arrays and learned weight copies.
+        # Release episode logs and the evaluated agents before the next evaluation.
         if progress:
             progress(dict(phase='generation-complete', generation=generation, summary=record['summary'], history=history))
         del record, detail, lifetime_population, champion, next_population, ancestry
     if progress:
         progress(dict(phase='finished', history=history))
-    return state
+    if return_state:
+        if 'population' not in state:
+            state['population'] = [agent.to_data() for agent in population]
+        return state
 
 
 def main():
@@ -202,6 +242,7 @@ def main():
     parser.add_argument('--initial-population', help='saved top-performer population to seed a new session')
     parser.add_argument('--population-save-count', type=int)
     parser.add_argument('--environment', choices=('original', 'shifted', 'lights-out', 'switches-2x2', 'lights-out-2x2', 'switchboard'))
+    parser.add_argument('--agent-y', action='store_true', default=None)
     parser.add_argument('--model', choices=('categorical', 'senses'))
     parser.add_argument('--receptors', type=int)
     parser.add_argument('--sensory-interface', choices=('legacy-bytes','retina','signals'))
@@ -219,6 +260,7 @@ def main():
     parser.add_argument('--encoding-seed', type=int)
     parser.add_argument('--seed', type=int)
     parser.add_argument('--backend', choices=('python', 'native'))
+    parser.add_argument('--reproduction-workers', type=int, help='offspring processes: 0 automatic, 1 serial')
     parser.add_argument('--workers', type=int)
     parser.add_argument('--batch-size', type=int)
     parser.add_argument('--distance-distribution', choices=('normal', 'uniform'))
@@ -239,16 +281,20 @@ def main():
     try:
         if args.resume:
             if any(getattr(args, name) is not None for name in
-                   ('output', 'config', 'population', 'model', 'receptors', 'sensory_interface', 'retina_width', 'retina_height', 'embedding_selection', 'sensory_partitions', 'action_policy', 'environment', 'initial_population', 'population_save_count', 'episodes', 'assessment_episodes', 'elites',
-                    'tournament_size', 'seed', 'encoding_seed', 'no_learning', 'fixed_goal', 'backend', 'workers', 'batch_size', 'distance_distribution', 'distance_mean', 'distance_stddev', 'speciation', 'speciation_threshold', 'max_species', 'boundary_mode', 'include_zero', 'inherit_lifetime') + STRUCTURE_ARGUMENTS):
+                   ('output', 'config', 'population', 'model', 'agent_y', 'receptors', 'sensory_interface', 'retina_width', 'retina_height', 'embedding_selection', 'sensory_partitions', 'action_policy', 'environment', 'initial_population', 'population_save_count', 'episodes', 'assessment_episodes', 'elites',
+                    'tournament_size', 'seed', 'encoding_seed', 'no_learning', 'fixed_goal', 'workers', 'reproduction_workers', 'batch_size', 'distance_distribution', 'distance_mean', 'distance_stddev', 'speciation', 'speciation_threshold', 'max_species', 'boundary_mode', 'include_zero', 'inherit_lifetime') + STRUCTURE_ARGUMENTS):
                 parser.error('resume uses saved configuration; only --generations and --no-live may override')
             config = TrainingConfig.from_data(load_checkpoint(args.resume)['config'])
+            if args.backend is not None:
+                if not config.agent_y or args.backend != 'native':
+                    parser.error('only Agent Y supports explicit --backend native migration on resume')
+                config = replace(config, backend='native')
             if args.generations is not None:
                 config = replace(config, generations=args.generations)
             directory = args.resume
         else:
             values = {name: getattr(args, name) for name in
-                      ('population', 'model', 'receptors', 'sensory_interface', 'retina_width', 'retina_height', 'embedding_selection', 'sensory_partitions', 'action_policy', 'environment', 'initial_population', 'population_save_count', 'generations', 'episodes', 'assessment_episodes', 'elites', 'tournament_size', 'seed', 'encoding_seed', 'backend', 'workers', 'batch_size', 'distance_distribution', 'distance_mean', 'distance_stddev', 'speciation', 'speciation_threshold', 'max_species', 'boundary_mode', 'include_zero', 'inherit_lifetime')
+                      ('population', 'model', 'agent_y', 'receptors', 'sensory_interface', 'retina_width', 'retina_height', 'embedding_selection', 'sensory_partitions', 'action_policy', 'environment', 'initial_population', 'population_save_count', 'generations', 'episodes', 'assessment_episodes', 'elites', 'tournament_size', 'seed', 'encoding_seed', 'backend', 'workers', 'reproduction_workers', 'batch_size', 'distance_distribution', 'distance_mean', 'distance_stddev', 'speciation', 'speciation_threshold', 'max_species', 'boundary_mode', 'include_zero', 'inherit_lifetime')
                       if getattr(args, name) is not None}
             if 'population' in values and 'elites' not in values:
                 values['elites'] = min(5, values['population'] - 1)
@@ -265,11 +311,17 @@ def main():
             config = apply_structure_arguments(config, args)
             directory = args.output or Path('runs') / datetime.now().strftime('run-%Y%m%d-%H%M%S')
         dashboard = Dashboard(config, live=not args.no_live)
+        def report_progress(event):
+            dashboard(event)
+            # Small status only: no histories, agent state or episode logs.
+            fields = ('phase', 'generation', 'completed', 'total', 'mean', 'best')
+            write_json(Path(directory) / 'progress.json', {k:event[k] for k in fields if k in event})
         print(f'Run directory: {directory}', flush=True)
         try:
             from .diagnostics import diagnostics
             with diagnostics(directory, args.memory_limit_mb):
-                run_experiment(config, directory, resume=bool(args.resume), progress=dashboard, champion_count=args.champion_count)
+                run_experiment(config, directory, resume=bool(args.resume), progress=report_progress,
+                               champion_count=args.champion_count, return_state=False)
         except KeyboardInterrupt:
             dashboard(dict(phase='interrupted'))
             if (directory / CHECKPOINT).exists():

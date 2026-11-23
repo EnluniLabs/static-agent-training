@@ -20,10 +20,12 @@ function view(name) {
   if(name==='overview'&&state.detail)chart(state.detail);
 }
 document.querySelectorAll('[data-view]').forEach(e=>e.onclick=()=>view(e.dataset.view));
+function currentRuns(){return state.runs.filter(r=>['agent-x','agent-y'].includes(r.model_family)||['assessment','starting-population-benchmark'].includes(r.kind));}
+function familyLabel(r){return r.model_family==='agent-y'?'Agent Y':r.model_family==='agent-x'?'Agent X':labels[r.kind]||r.kind;}
 function renderLibrary() {
   const filter=$('filter').value, search=$('search').value.trim().toLowerCase(), scroll=$('session-list').scrollTop;
-  const rows=state.runs.filter(r=>(filter==='all'||r.kind===filter)&&((r.name+' '+(r.session?.name||'')).toLowerCase().includes(search)));
-  const cards=rows.map(r=>{const b=node('button',undefined,'session-card kind-'+r.kind);b.classList.toggle('selected',r.run===state.selected);b.setAttribute('aria-current',r.run===state.selected?'true':'false');b.append(node('span',labels[r.kind]||r.kind,'kind-tag'),node('strong',r.session?.name||r.name),node('small',r.state+(r.progress?' · '+r.progress:'')));b.onclick=()=>selectRun(r.run);return b;});
+  const rows=currentRuns().filter(r=>(filter==='all'||r.kind===filter||r.model_family===filter)&&((r.name+' '+(r.session?.name||'')).toLowerCase().includes(search)));
+  const cards=rows.map(r=>{const b=node('button',undefined,'session-card kind-'+r.kind);b.classList.toggle('selected',r.run===state.selected);b.setAttribute('aria-current',r.run===state.selected?'true':'false');b.append(node('span',familyLabel(r),'kind-tag'),node('strong',r.session?.name||r.name),node('small',r.state+(r.progress?' · '+r.progress:'')));b.onclick=()=>selectRun(r.run);return b;});
   $('session-list').replaceChildren(...(cards.length?cards:[node('p','No matching sessions.','muted')]));$('session-list').scrollTop=scroll;
 }
 $('filter').onchange=renderLibrary;$('search').oninput=renderLibrary;
@@ -57,8 +59,10 @@ function chart(detail) {
 function table(headings,rows){const t=node('table'),head=node('tr');headings.forEach(h=>head.append(node('th',h)));const thead=node('thead');thead.append(head);t.append(thead);const body=node('tbody');rows.forEach(values=>{const tr=node('tr');values.forEach(v=>{const cell=node('td');if(v instanceof Node)cell.append(v);else cell.textContent=v;tr.append(cell);});body.append(tr);});t.append(body);return t;}
 function renderDetail(d) {
   state.detail=d;const row=state.runs.find(r=>r.run===state.selected), report=d.report||{}, latest=d.series?.at(-1)||{};
-  $('run-title').textContent=row?.session?.name||row?.name||d.run;$('run-subtitle').textContent=(labels[d.kind]||'Session')+' · '+d.run+((d.config?.environment||report.config?.environment)==='switchboard'?' · Three-panel switchboard':(d.config?.environment||report.config?.environment)==='switches-2x2'?' · Simple switches 2×2':(d.config?.environment||report.config?.environment)==='lights-out-2x2'?' · Lights Out 2×2':(d.config?.environment||report.config?.environment)==='lights-out'?' · Lights Out 3×3':(d.config?.environment||report.config?.environment)==='shifted'?' · Shifted [30, 70]':'');
+  $('run-title').textContent=row?.session?.name||row?.name||d.run;$('run-subtitle').textContent=(familyLabel(row||{})||'Session')+' · '+d.run+((d.config?.environment||report.config?.environment)==='switchboard'?' · Three-panel switchboard':(d.config?.environment||report.config?.environment)==='switches-2x2'?' · Simple switches 2×2':(d.config?.environment||report.config?.environment)==='lights-out-2x2'?' · Lights Out 2×2':(d.config?.environment||report.config?.environment)==='lights-out'?' · Lights Out 3×3':(d.config?.environment||report.config?.environment)==='shifted'?' · Shifted [30, 70]':'');
   if(row?.elapsed_seconds!=null){const minutes=Math.floor(row.elapsed_seconds/60);$('run-subtitle').textContent+=` · ${minutes} min elapsed`+(row.remaining_seconds!=null?` · about ${Math.ceil(row.remaining_seconds/60)} min remaining`:'');}
+  const evaluation=d.evaluation_progress;
+  if(row?.state==='running'&&evaluation?.phase==='evaluating')$('run-subtitle').textContent+=` · Generation ${evaluation.generation+1}: ${evaluation.completed}/${evaluation.total} agents evaluated`;
   $('run-purpose').textContent=d.session?.config?.notes||d.run_metadata?.notes||'';$('run-purpose').hidden=!$('run-purpose').textContent;
   $('run-state').textContent=row?.state||report.status||'Saved';$('run-state').className='badge '+(row?.state||'');
   let metrics=[];
@@ -84,22 +88,24 @@ function renderDetail(d) {
   $('stop-session').textContent=job?.state==='stopping'?'Stopping…':'Stop session';
   const generational=['training','sensory-training'].includes(d.kind);
   const resumable=!['running','stopping','finishing'].includes(row?.state)&&((generational&&d.files.includes('checkpoint.json.gz'))||(['interfaces','comparison','model-comparison','starting-population-benchmark'].includes(d.kind)&&['stopped','failed','interrupted'].includes(row?.state)));
+  $('resume-session').textContent=d.config?.agent_y&&d.config.backend==='python'?'Resume with native CPU':'Resume session';
   $('resume-session').hidden=!resumable;$('resume-options').hidden=!(resumable&&generational);
   if(generational&&document.activeElement!==$('resume-generations')){const current=d.config?.generations||50;if($('resume-generations').dataset.run!==d.run||(row?.state==='completed'&&Number($('resume-generations').value)<=current)){$('resume-generations').value=current+(row?.state==='completed'?100:0);$('resume-generations').dataset.run=d.run;}$('resume-generations').min=current;}
   $('resume-session').textContent=row?.state==='completed'?'Continue training':'Resume session';
   $('ownership').textContent=job?'Stopping preserves the last completed checkpoint.':'Saved session · external live processes remain view-only.';
   $('save-population').disabled=!['training','sensory-training'].includes(d.kind)||!d.series.length;$('candidate-save-options').hidden=!['training','sensory-training'].includes(d.kind);if($('candidate-save-count').dataset.run!==d.run){$('candidate-save-count').value=d.config?.population_save_count||10;$('candidate-save-count').dataset.run=d.run;$('candidate-set-name').value='';}
-  $('open-model').disabled=!['training','sensory-training','interfaces','senses'].includes(d.kind);
+  $('open-model').disabled=d.kind!=='sensory-training'||!currentRuns().some(r=>r.run===d.run);
 }
 async function loadDetail(){const run=state.selected,epoch=++state.detailEpoch;if(!run)return;try{const d=await api('/api/run?'+new URLSearchParams({run}));if(run===state.selected&&epoch===state.detailEpoch){renderDetail(d);$('overview-error').textContent='';await loadLog();}}catch(e){if(run===state.selected)$('overview-error').textContent=e.message;}}
 async function loadLog(){const run=state.selected;if(!run)return;try{const d=await api('/api/log?'+new URLSearchParams({run,source:$('log-source').value}));if(run===state.selected){const p=$('log-output'),follow=p.scrollHeight-p.scrollTop-p.clientHeight<40;p.textContent=d.text;if(follow)p.scrollTop=p.scrollHeight;}}catch(e){$('log-output').textContent=e.message;}}
 $('log-source').onchange=loadLog;
 $('stop-session').onclick=async()=>{try{await api('/api/stop',{id:state.detail.session.id});await refresh();}catch(e){$('overview-error').textContent=e.message;}};
-$('resume-session').onclick=async()=>{try{const data={run:state.selected};if(['training','sensory-training'].includes(state.detail.kind))data.generations=Number($('resume-generations').value);const job=await api('/api/resume-run',data);await refresh();await selectRun(job.run);}catch(e){$('overview-error').textContent=e.message;}};
+$('resume-session').onclick=async()=>{try{const data={run:state.selected};if(state.detail.config?.agent_y&&state.detail.config.backend==='python')data.backend='native';if(['training','sensory-training'].includes(state.detail.kind))data.generations=Number($('resume-generations').value);const job=await api('/api/resume-run',data);await refresh();await selectRun(job.run);}catch(e){$('overview-error').textContent=e.message;}};
 $('save-population').onclick=async()=>{try{$('save-population').disabled=true;const result=await api('/api/save-population',{run:state.selected,count:Number($('candidate-save-count').value),name:$('candidate-set-name').value});state.populations=await api('/api/populations');$('overview-error').textContent=`Saved ${result.count} candidates as “${result.name}”. Choose this set under Load saved candidates in a new training session.`;}catch(e){$('overview-error').textContent=e.message;}finally{$('save-population').disabled=false;}};
-$('open-model').onclick=()=>{const kind=state.detail?.kind;$('play-model').value=['senses','sensory-training'].includes(kind)?'senses':'baseline';view('playground');$('play-run').value=state.selected;loadSnapshots();};
+$('open-model').onclick=()=>{const kind=state.detail?.kind;$('play-model').value=state.detail?.config?.agent_y?'agent-y':'agent-x';view('playground');$('play-run').value=state.selected;loadSnapshots();};
 
 const common=[['episodes','Learning episodes',100],['assessment_episodes','Assessment episodes',200]];
+function currentPopulations(){return state.populations.filter(p=>p.model==='senses'&&(p.agent_y||p.sensory_partitions>1||p.sensory_interface==='signals'));}
 const numeric=(name,label,value)=>({name,label,value,type:'number'});
 // Scientific starting settings, not evidence of improved fitness.
 const structureKeys=['initial_pairs','chain_budget','seed_term_max_nodes','seed_term_max_depth','combinator_probability','development_max_nodes','development_max_transitions','subtree_probability','term_probability','insertion_probability','deletion_probability','new_pair_budget'];
@@ -113,23 +119,29 @@ function applyStructurePreset(){const preset=$('config-structure_preset').value;
 function structureSummary(c){return (c.sensory_interface?` Apparatus fixed at birth: ${c.sensory_interface==='signals'?`${c.retina_width}×${c.retina_height} signal receptor layout · tiles · indexing only`:c.sensory_interface==='retina'?`${c.retina_width}×${c.retina_height} retina · tiles`:'legacy bytes'} · ${c.receptors} receptors · ${c.sensory_partitions} partitions. `:'')+` Starting pairs: ${c.initial_pairs}; seed terms: ${c.seed_term_max_nodes} nodes / depth ${c.seed_term_max_depth}; development: ${c.development_max_nodes} nodes / ${c.development_max_transitions} transitions; reductions: ${c.chain_budget} initial / ${c.new_pair_budget} new pairs.`;}
 const environmentField={name:'environment',label:'Environment',type:'select',options:[['original','Original [−20, 20]'],['switchboard','Three-panel switchboard'],['shifted','Shifted [30, 70]'],['switches-2x2','Simple switches · 2×2'],['lights-out-2x2','Lights Out · 2×2 puzzle'],['lights-out','Lights Out · 3×3 puzzle']]};
 const fields={
-  training:[environmentField,{name:'initial_population',label:'Load saved candidates',type:'population'},numeric('population_save_count','Top candidates to retain',10),numeric('population','Animals',32),numeric('generations','Generations',50),...common.map(x=>numeric(...x)),numeric('seed','Seed',48),{name:'backend',label:'Evaluator',type:'select',options:[['native','Native CPU'],['python','Python reference']]},numeric('workers','CPU workers',4),numeric('batch_size','Batch size',256),numeric('champion_count','Generation champions to keep',10),numeric('memory_limit_mb','Memory ceiling (MiB)',4096),{name:'learning',label:'Lifetime learning',type:'checkbox',value:true},{name:'inherit_lifetime',label:'Inherit learned weights',type:'checkbox',value:false},{name:'speciation',label:'Structural speciation',type:'checkbox',value:false}],
+  training:[environmentField,{name:'initial_population',label:'Load saved candidates',type:'population'},numeric('population_save_count','Top candidates to retain',10),numeric('population','Animals',32),numeric('generations','Generations',50),...common.map(x=>numeric(...x)),numeric('seed','Seed',48),{name:'backend',label:'Evaluator',type:'select',options:[['native','Native CPU'],['python','Python reference']]},numeric('workers','CPU workers',4),numeric('reproduction_workers','Offspring processes · 0 automatic, 1 serial',0),numeric('batch_size','Batch size',256),numeric('champion_count','Generation champions to keep',10),numeric('memory_limit_mb','Memory ceiling (MiB)',4096),{name:'learning',label:'Lifetime learning',type:'checkbox',value:true},{name:'inherit_lifetime',label:'Inherit learned weights',type:'checkbox',value:false},{name:'speciation',label:'Structural speciation',type:'checkbox',value:false}],
 };
 fields['sensory-training']=[{name:'sensory_interface',label:'Sensory interface · immutable after birth',type:'select',options:[['signals','Signals · universal source bytes'],['legacy-bytes','Legacy bytes · historical controls'],['retina','Retina · historical packed binary pixels']]},numeric('retina_width','Receptor layout width',16),numeric('retina_height','Receptor layout height',16),{name:'embedding_selection',label:'Embedding selection',type:'select',options:[['argmax','Highest probability · random exact ties'],['sample','Probability-weighted sampling']]},numeric('receptors','Resolution · receptor count',256),numeric('sensory_partitions','Parallel sensory partitions',1),{name:'action_policy',label:'Parallel action policy',type:'select',options:[['agreement','Agreement · all proposals must agree'],['vote','Vote · most proposed action wins']]},...fields.training.map(f=>({...f}))];
 fields.training.push(...structureFields);
 fields['sensory-training'].push(...structureFields);
 const descriptions={'starting-population-benchmark':'Two full evolutionary sessions with matched tasks and budgets. Each arm can start fresh or load any saved candidate set for this model. Compare population curves across generations and a final frozen champion test.',training:'Evolutionary training with categorical mappings. Start fresh or load saved candidates, choose an environment, then evolve through selection and mutation.','sensory-training':'Evolutionary training with fixed senses. Start fresh or load saved candidates, choose an environment, then evolve through selection and mutation.'};
-function setupKind(){const previous=$('session-kind').value,kind=['senses','agent-x'].includes($('model-family').value)?'sensory-training':'training';fields['starting-population-benchmark']=[environmentField,{name:'population_a',label:'Arm A — starting candidates',type:'population'},{name:'population_b',label:'Arm B — starting candidates',type:'population'},...fields[kind].filter(f=>!['environment','initial_population'].includes(f.name)),numeric('benchmark_episodes','Final shared test episodes',2000)];$('session-kind').replaceChildren(...[[kind,'Evolutionary training'],['starting-population-benchmark','Compare starting populations']].map(([value,label])=>{const option=node('option',label);option.value=value;return option;}));if(previous==='starting-population-benchmark')$('session-kind').value=previous;renderFields();}
-function renderFields(){ $('parallel-senses-help').hidden=!['senses','agent-x'].includes($('model-family').value);const kind=$('session-kind').value;$('model-description').textContent=$('model-family').value==='agent-x'&&kind!=='starting-population-benchmark'?'Agent X activates several sensory regions independently and runs their chains in parallel. Configure how their action proposals are resolved.':descriptions[kind];$('session-fields').replaceChildren(...fields[kind].map(field=>{const label=node('label',field.label),input=node(['select','candidate','population','populations'].includes(field.type)?'select':'input');input.dataset.config=field.name;input.id='config-'+field.name;
-  if(field.type==='select'){input.replaceChildren(...field.options.map(([v,l])=>{const o=node('option',l);o.value=v;return o;}));if(field.name==='sensory_interface')input.value=$('model-family').value==='agent-x'?'signals':'legacy-bytes';}
-  else if(['population','populations'].includes(field.type)){input.multiple=field.type==='populations';if(!input.multiple){const empty=node('option','Start fresh');empty.value='';input.append(empty);}else input.size=5;for(const p of state.populations.filter(p=>p.model===(['senses','agent-x'].includes($('model-family').value)?'senses':'categorical'))){const option=node('option',`${p.name} · ${p.count} animals · ${p.model} · ${p.sensory_interface||'legacy-bytes'} · ${p.environment}`);option.value=p.id;input.append(option);}}
+function setupKind(){const previous=$('session-kind').value,kind=['senses','agent-x','agent-y'].includes($('model-family').value)?'sensory-training':'training';fields['starting-population-benchmark']=[environmentField,{name:'population_a',label:'Arm A — starting candidates',type:'population'},{name:'population_b',label:'Arm B — starting candidates',type:'population'},...fields[kind].filter(f=>!['environment','initial_population'].includes(f.name)),numeric('benchmark_episodes','Final shared test episodes',2000)];$('session-kind').replaceChildren(...(['agent-y'].includes($('model-family').value)?[[kind,'Evolutionary training']]:[[kind,'Evolutionary training'],['starting-population-benchmark','Compare starting populations']]).map(([value,label])=>{const option=node('option',label);option.value=value;return option;}));if(previous==='starting-population-benchmark'&&$('model-family').value!=='agent-y')$('session-kind').value=previous;renderFields();}
+function renderFields(){ $('parallel-senses-help').hidden=!['senses','agent-x','agent-y'].includes($('model-family').value);const kind=$('session-kind').value;$('model-description').textContent=$('model-family').value==='agent-x'&&kind!=='starting-population-benchmark'?'Agent X activates several sensory regions independently and runs their chains in parallel. Configure how their action proposals are resolved.':descriptions[kind];$('session-fields').replaceChildren(...fields[kind].map(field=>{const label=node('label',field.label),input=node(['select','candidate','population','populations'].includes(field.type)?'select':'input');input.dataset.config=field.name;input.id='config-'+field.name;
+  if(field.type==='select'){input.replaceChildren(...field.options.map(([v,l])=>{const o=node('option',l);o.value=v;return o;}));if(field.name==='sensory_interface')input.value=['agent-x','agent-y'].includes($('model-family').value)?'signals':'legacy-bytes';}
+  else if(['population','populations'].includes(field.type)){input.multiple=field.type==='populations';if(!input.multiple){const empty=node('option','Start fresh');empty.value='';input.append(empty);}else input.size=5;for(const p of currentPopulations().filter(p=>p.model===(['senses','agent-x','agent-y'].includes($('model-family').value)?'senses':'categorical')&&Boolean(p.agent_y)===($('model-family').value==='agent-y'))){const option=node('option',`${p.name} · ${p.count} animals · ${p.agent_y?'Agent Y':'Agent X'} · ${p.sensory_interface||'legacy-bytes'} · ${p.environment}`);option.value=p.id;input.append(option);}}
   else if(field.type==='candidate'){const empty=node('option','Develop a fresh repertoire');empty.value='';input.append(empty);state.runs.filter(r=>r.kind==='training'&&r.summary).forEach(r=>{const o=node('option',r.name);o.value=r.run;input.append(o);});}
   else if(field.type==='checkbox'){input.type='checkbox';input.checked=field.value;label.className='checkbox-label';label.prepend(input);return label;}
-  else{input.type=field.type==='seeds'?'text':'number';input.value=field.name==='sensory_partitions'&&$('model-family').value==='agent-x'?4:field.value;if(input.type==='number'){input.min=field.name==='seed'?0:field.name==='memory_limit_mb'?256:field.name==='receptors'?16:1;input.step=field.name==='receptors'?16:1;}input.required=true;}
+  else{input.type=field.type==='seeds'?'text':'number';input.value=field.name==='sensory_partitions'&&['agent-x','agent-y'].includes($('model-family').value)?4:field.value;if(input.type==='number'){input.min=['seed','reproduction_workers'].includes(field.name)?0:field.name==='memory_limit_mb'?256:field.name==='receptors'?16:1;input.step=field.name==='receptors'?16:1;}input.required=true;}
   if(structureKeys.includes(field.name)){label.className='structure-control';if(field.name.endsWith('_probability')){input.min=0;input.max=1;input.step=.01;}else{input.min=['chain_budget','new_pair_budget'].includes(field.name)?0:['seed_term_max_nodes','seed_term_max_depth'].includes(field.name)?2:1;input.max=2147483647;}}
   input.oninput=()=>{if(['initial_population','population_a','population_b'].includes(field.name))adoptSourceApparatus();if(structureKeys.includes(field.name))$('config-structure_preset').value='custom';setupSummary();};label.append(input);return label;}));
-  const profile=$('config-structure_preset');profile.value=$('model-family').value==='agent-x'?'exploratory':'baseline';profile.onchange=applyStructurePreset;applyStructurePreset();}
-function configValues(){const result={};for(const field of fields[$('session-kind').value]){const e=$('config-'+field.name);result[field.name]=field.type==='populations'?Array.from(e.selectedOptions,o=>o.value):field.type==='checkbox'?e.checked:field.type==='seeds'?e.value.split(/[\s,]+/).filter(Boolean).map(Number):field.type==='number'?Number(e.value):e.value;}if($('session-kind').value==='starting-population-benchmark')result.model=['senses','agent-x'].includes($('model-family').value)?'senses':'categorical';result.notes=$('session-notes').value;return result;}
+  if($('model-family').value==='agent-y'){
+    $('model-description').textContent='Agent Y learns receptor grouping from prediction feedback, using shared signal-to-pair mappings. Native CPU evaluation; receptor membership and group count are learned.';
+    $('config-sensory_partitions').value=1;$('config-sensory_partitions').closest('label').hidden=true;
+    $('config-backend').value='native';
+    $('config-embedding_selection').value='argmax';$('config-embedding_selection').disabled=true;
+  }
+  const profile=$('config-structure_preset');profile.value=['agent-x','agent-y'].includes($('model-family').value)?'exploratory':'baseline';profile.onchange=applyStructurePreset;applyStructurePreset();}
+function configValues(){const result={};for(const field of fields[$('session-kind').value]){const e=$('config-'+field.name);result[field.name]=field.type==='populations'?Array.from(e.selectedOptions,o=>o.value):field.type==='checkbox'?e.checked:field.type==='seeds'?e.value.split(/[\s,]+/).filter(Boolean).map(Number):field.type==='number'?Number(e.value):e.value;}if($('session-kind').value==='starting-population-benchmark')result.model=['senses','agent-x','agent-y'].includes($('model-family').value)?'senses':'categorical';if($('model-family').value==='agent-y')result.agent_y=true;result.notes=$('session-notes').value;return result;}
 function adoptSourceApparatus(){
   const c=configValues(),source=state.populations.find(p=>p.id===(c.initial_population||c.population_a||c.population_b));
   for(const key of ['receptors','sensory_partitions','sensory_interface','retina_width','retina_height']){
@@ -148,12 +160,12 @@ function setupSummary(){const c=configValues();
   }
   const partitions=$('config-sensory_partitions'),selection=$('config-embedding_selection');if(partitions){const minimum=1;partitions.min=minimum;partitions.max=c.receptors;partitions.setCustomValidity(Number.isInteger(c.sensory_partitions)&&c.sensory_partitions>=minimum&&c.sensory_partitions<=c.receptors?'':`Choose an integer from ${minimum} to the receptor count.`);selection.setCustomValidity(c.sensory_partitions>1&&c.embedding_selection!=='argmax'?'Parallel sensory partitions require highest-probability embedding selection.':'');}if($('session-kind').value==='starting-population-benchmark'){const label=id=>state.populations.find(p=>p.id===id)?.name||'Start fresh';$('setup-summary').textContent=`A: ${label(c.population_a)} · B: ${label(c.population_b)}. Each arm: ${c.population} animals × ${c.generations} evolutionary generations in ${c.environment==='switchboard'?'Three-panel switchboard':c.environment==='switches-2x2'?'Simple switches 2×2':c.environment==='lights-out-2x2'?'Lights Out 2×2':c.environment==='lights-out'?'Lights Out 3×3':c.environment==='shifted'?'[30, 70]':'[−20, 20]'}. Identical training and assessment tasks; ${c.benchmark_episodes} shared final test episodes.`+structureSummary(c);return;}const source=state.populations.find(p=>p.id===c.initial_population);$('setup-summary').textContent=(c.sensory_partitions>1?`Agent X · ${c.sensory_partitions} parallel regions. `:'')+`${c.environment==='switchboard'?'Three-panel switchboard':c.environment==='switches-2x2'?'Simple switches 2×2':c.environment==='lights-out-2x2'?'Lights Out 2×2':c.environment==='lights-out'?'Lights Out 3×3':c.environment==='shifted'?'Shifted [30, 70]':'Original [−20, 20]'} · ${c.initial_population?'Loaded candidates seed the population; extra slots are mutated descendants. ':'Fresh population. '}${c.population} animals × ${c.generations} generations. Each animal: ${c.episodes} learning + ${c.assessment_episodes} assessment episodes per generation.`+(source?.model==='categorical'&&source.environment!==c.environment?' New categorical input and prediction tokens will be initialized for this environment.':'')+structureSummary(c);}
 $('model-family').onchange=setupKind;$('session-kind').onchange=renderFields;
-$('launch-form').onsubmit=async event=>{event.preventDefault();$('launch').disabled=true;$('setup-error').textContent='';$('launch-status').textContent='Starting…';try{const job=await api('/api/sessions',{kind:$('session-kind').value,name:$('session-name').value,config:configValues()});$('launch-status').textContent='Session started.';await refresh();await selectRun(job.run);}catch(e){$('setup-error').textContent=e.message;$('launch-status').textContent='';}finally{$('launch').disabled=false;}};
+$('launch-form').onsubmit=async event=>{event.preventDefault();$('launch').disabled=true;$('setup-error').textContent='';$('launch-status').textContent='Starting…';try{const job=await api('/api/sessions',{kind:$('session-kind').value,name:$('session-name').value||($('model-family').value==='agent-y'?'Agent Y evolution':'Agent X evolution'),config:configValues()});$('launch-status').textContent='Session started.';await refresh();await selectRun(job.run);}catch(e){$('setup-error').textContent=e.message;$('launch-status').textContent='';}finally{$('launch').disabled=false;}};
 
 let assessmentRun=null,assessmentJob=null,assessmentBusy=false,assessmentEpoch=0,assessmentOptionsKey='';
 function assessmentSelectionSummary(){
   const ids=new Set(Array.from(document.querySelectorAll('#assessment-populations input:checked'),e=>e.value));
-  const populations=state.populations.filter(p=>ids.has(p.id)),count=populations.reduce((n,p)=>n+p.count,0),episodes=Number($('assessment-episodes').value);
+  const populations=currentPopulations().filter(p=>ids.has(p.id)),count=populations.reduce((n,p)=>n+p.count,0),episodes=Number($('assessment-episodes').value);
   $('assessment-plan-count').textContent=populations.length?`${populations.length} population${populations.length===1?'':'s'} · ${count.toLocaleString()} candidates`:'No populations selected';
   $('assessment-plan-detail').textContent=count&&Number.isInteger(episodes)&&episodes>0?`${(count*episodes).toLocaleString()} total episodes · ${episodes.toLocaleString()} per candidate`:'Choose candidates and an episode count to build your assessment.';
   $('assessment-launch').disabled=assessmentBusy||!count;
@@ -161,21 +173,21 @@ function assessmentSelectionSummary(){
 function filterAssessmentPopulations(){
   const query=$('assessment-search').value.trim().toLowerCase();let count=0;
   for(const card of document.querySelectorAll('.population-card')){card.hidden=!card.dataset.search.includes(query);if(!card.hidden)count++;}
-  $('assessment-no-match').hidden=Boolean(count)||!state.populations.length;
+  $('assessment-no-match').hidden=Boolean(count)||!currentPopulations().length;
 }
 function assessmentChoices(){
   const key=JSON.stringify(state.populations);if(key===assessmentOptionsKey){assessmentSelectionSummary();return;}assessmentOptionsKey=key;
   const selected=new Set(Array.from(document.querySelectorAll('#assessment-populations input:checked'),e=>e.value));
-  $('assessment-populations').replaceChildren(...state.populations.map(p=>{
+  $('assessment-populations').replaceChildren(...currentPopulations().map(p=>{
     const card=node('div',undefined,'population-card'),label=node('label'),input=node('input'),body=node('div'),tags=node('div',undefined,'population-tags');
     card.dataset.search=`${p.name} ${p.model} ${p.environment}`.toLowerCase();
     input.type='checkbox';input.value=p.id;input.checked=selected.has(p.id);input.setAttribute('aria-label',p.name);input.onchange=assessmentSelectionSummary;
-    tags.append(node('span',p.model==='senses'?'Fixed senses':'Categorical','population-tag '+p.model),node('span',environmentField.options.find(([id])=>id===p.environment)?.[1]||p.environment,'population-tag'));
+    tags.append(node('span',p.agent_y?'Agent Y':'Agent X','population-tag '+p.model),node('span',environmentField.options.find(([id])=>id===p.environment)?.[1]||p.environment,'population-tag'));
     body.append(node('strong',p.name),tags);label.append(input,body);
     const footer=node('div',undefined,'population-card-footer'),remove=node('button','Delete');remove.type='button';remove.setAttribute('aria-label',`Delete candidates ${p.name}`);remove.onclick=()=>deletePopulation(p);
     footer.append(node('span',`${p.count.toLocaleString()} saved candidates`),remove);card.append(label,footer);return card;
   }));
-  if(!state.populations.length){const empty=node('div',undefined,'assessment-empty');empty.append(node('h3','Your candidates belong here.'),node('p','Save candidates from a training session, then return to put them to the test.'));$('assessment-populations').append(empty);}
+  if(!currentPopulations().length){const empty=node('div',undefined,'assessment-empty');empty.append(node('h3','Your candidates belong here.'),node('p','Save candidates from a training session, then return to put them to the test.'));$('assessment-populations').append(empty);}
   const missing=node('p','No populations match your search.','muted');missing.id='assessment-no-match';missing.hidden=true;$('assessment-populations').append(missing);
   filterAssessmentPopulations();assessmentSelectionSummary();
 }
@@ -195,7 +207,7 @@ function assessmentReport(report){
     const card=node('article',undefined,'assessment-result'),body=node('div'),bar=node('div',undefined,'assessment-bar'),fill=node('span',undefined,'assessment-bar-fill'),baseline=node('span',undefined,'assessment-bar-baseline'),score=node('div',pct(pop.mean_success),'assessment-score');
     const valid=Number.isFinite(pop.mean_success);fill.style.width=(valid?Math.max(0,Math.min(100,pop.mean_success*100)):0)+'%';
     baseline.hidden=!Number.isFinite(report.random_success);baseline.style.left=(Math.max(0,Math.min(1,report.random_success||0))*100)+'%';baseline.title='Random baseline: '+pct(report.random_success);bar.append(fill,baseline);
-    body.append(node('div',pop.name,'assessment-result-name'),node('span',`${pop.model==='senses'?'Fixed senses':'Categorical'} · ${pop.completed}/${pop.count} assessed · Best ${pct(pop.best_success)} · Worst ${pct(pop.worst_success)}`,'assessment-result-meta'),bar);
+    body.append(node('div',pop.name,'assessment-result-name'),node('span',`${pop.agent_y?'Agent Y':'Agent X'} · ${pop.completed}/${pop.count} assessed · Best ${pct(pop.best_success)} · Worst ${pct(pop.worst_success)}`,'assessment-result-meta'),bar);
     let caption='Mean success';if(valid&&Number.isFinite(report.random_success))caption+=` · ${pp(100*(pop.mean_success-report.random_success))} vs random`;
     score.append(node('small',caption));card.append(node('span',String(i+1).padStart(2,'0'),'assessment-rank'),body,score);return card;
   }));
@@ -217,9 +229,9 @@ $('play-learning').onchange=learningStatus;
 $('reset-learning').onclick=()=>{if(state.attemptBusy)return;resetPlayLifetime();clearPlayback();$('frame-label').textContent='Learned state reset to the saved snapshot.';};
 function pause(){clearInterval(timer);timer=null;$('play').textContent='Play';}
 function clearPlayback(){clearStreamPreview();clearBrain();state.attemptEpoch++;pause();playback=null;frameIndex=0;$('world-scale').replaceChildren();$('puzzle-current').replaceChildren();$('puzzle-view').hidden=true;$('animal').setAttribute('visibility','hidden');$('target').setAttribute('visibility','hidden');$('position').textContent='';$('sensory-panel').hidden=true;for(const id of ['play','step','restart'])$(id).disabled=true;$('scrub').max=0;$('frame-detail').textContent='';}
-function updatePlayRuns(){const model=$('play-model').value,previous=$('play-run').value;const rows=state.runs.filter(r=>r.kind==='interfaces'||(model==='senses'?['senses','sensory-training'].includes(r.kind):r.kind==='training'));$('play-run').replaceChildren(...rows.map(r=>{const o=node('option',r.name);o.value=r.run;return o;}));if(rows.some(r=>r.run===previous))$('play-run').value=previous;else if(rows.some(r=>r.run===state.selected))$('play-run').value=state.selected;loadSnapshots();}
-async function loadSnapshots(){const run=$('play-run').value,previous=$('play-snapshot').value,epoch=++state.snapshotEpoch;clearPlayback();state.snapshots=[];streamAvailability();$('attempt').disabled=true;$('again').disabled=true;$('snapshot-info').textContent='Loading snapshots…';$('play-snapshot').replaceChildren();if(!run){$('snapshot-info').textContent='No saved snapshots for this model yet.';return;}try{const options=await api('/api/models?'+new URLSearchParams({run,model:$('play-model').value}));if(epoch!==state.snapshotEpoch)return;state.snapshots=options;$('play-snapshot').replaceChildren(...options.map(o=>{const e=node('option',o.label+(o.sensory_partitions>1?' · Agent X · '+o.sensory_partitions+' regions':''));e.value=o.id;return e;}));if(options.some(o=>o.id===previous))$('play-snapshot').value=previous;snapshotInfo();}catch(e){if(epoch===state.snapshotEpoch)$('snapshot-info').textContent=e.message;}}
-function snapshotInfo(){clearPlayback();const selected=state.snapshots.find(o=>o.id===$('play-snapshot').value);if((selected?.id||null)!==lifetimeSnapshot){resetPlayLifetime();lifetimeSnapshot=selected?.id||null;}$('attempt').disabled=!selected;$('again').disabled=!selected;$('snapshot-info').textContent=selected?`${selected.label}${selected.sensory_interface==='signals'?` · ${selected.retina_width}×${selected.retina_height} receptor signals · fixed layout`:selected.sensory_interface==='retina'?` · native ${selected.retina_width}×${selected.retina_height} retina`:' · legacy bytes'}${selected.sensory_partitions>1?' · Agent X · '+selected.sensory_partitions+' regions':''}${selected.training_success!=null?' · training '+pct(selected.training_success):''}${selected.assessment_success!=null?' · saved held-out '+pct(selected.assessment_success):''}. Saved snapshot; optional learning uses a separate playground copy.`+(!puzzleSize(selected.environment)&&selected.boundary_mode==='terminate'?' Saved scores used out-of-bounds failure.':''):'No completed model snapshot saved yet.';$('frame-label').textContent=selected?'Snapshot ready. Choose a task.':'Select a saved snapshot.';const senses=$('play-model').value==='senses';$('play-world').disabled=!senses;if(!senses||selected?.environment)$('play-world').value=selected?.environment||'original';$('export-model').hidden=!selected;if(selected){$('export-model').href='/api/export?'+new URLSearchParams({snapshot:selected.id});$('export-model').download=selected.model+'-snapshot'+(selected.id.startsWith('candidate:')?'.json':'.json.gz');}worldLimits();goalMode();$('reset-learning').disabled=!selected;streamAvailability();}
+function updatePlayRuns(){const model=$('play-model').value,previous=$('play-run').value;const rows=currentRuns().filter(r=>r.model_family===model);$('play-run').replaceChildren(...rows.map(r=>{const o=node('option',r.name);o.value=r.run;return o;}));if(rows.some(r=>r.run===previous))$('play-run').value=previous;else if(rows.some(r=>r.run===state.selected))$('play-run').value=state.selected;loadSnapshots();}
+async function loadSnapshots(){const run=$('play-run').value,previous=$('play-snapshot').value,epoch=++state.snapshotEpoch;clearPlayback();state.snapshots=[];streamAvailability();$('attempt').disabled=true;$('again').disabled=true;$('snapshot-info').textContent='Loading snapshots…';$('play-snapshot').replaceChildren();if(!run){$('snapshot-info').textContent='No saved snapshots for this model yet.';return;}try{const options=await api('/api/models?'+new URLSearchParams({run,model:'senses'}));if(epoch!==state.snapshotEpoch)return;state.snapshots=options.filter(o=>Boolean(o.agent_y)===($('play-model').value==='agent-y'));$('play-snapshot').replaceChildren(...state.snapshots.map(o=>{const e=node('option',o.label+(o.agent_y?' · Agent Y · learned grouping':o.sensory_partitions>1?' · Agent X · '+o.sensory_partitions+' regions':''));e.value=o.id;return e;}));if(options.some(o=>o.id===previous))$('play-snapshot').value=previous;snapshotInfo();}catch(e){if(epoch===state.snapshotEpoch)$('snapshot-info').textContent=e.message;}}
+function snapshotInfo(){clearPlayback();const selected=state.snapshots.find(o=>o.id===$('play-snapshot').value);if((selected?.id||null)!==lifetimeSnapshot){resetPlayLifetime();lifetimeSnapshot=selected?.id||null;}$('attempt').disabled=!selected;$('again').disabled=!selected;$('snapshot-info').textContent=selected?`${selected.label}${selected.sensory_interface==='signals'?` · ${selected.retina_width}×${selected.retina_height} receptor signals · fixed layout`:selected.sensory_interface==='retina'?` · native ${selected.retina_width}×${selected.retina_height} retina`:' · legacy bytes'}${selected.sensory_partitions>1?' · Agent X · '+selected.sensory_partitions+' regions':''}${selected.training_success!=null?' · training '+pct(selected.training_success):''}${selected.assessment_success!=null?' · saved held-out '+pct(selected.assessment_success):''}. Saved snapshot; optional learning uses a separate playground copy.`+(!puzzleSize(selected.environment)&&selected.boundary_mode==='terminate'?' Saved scores used out-of-bounds failure.':''):'No completed model snapshot saved yet.';$('frame-label').textContent=selected?'Snapshot ready. Choose a task.':'Select a saved snapshot.';const senses=['agent-x','agent-y'].includes($('play-model').value);$('play-world').disabled=!senses;if(!senses||selected?.environment)$('play-world').value=selected?.environment||'original';$('export-model').hidden=!selected;if(selected){$('export-model').href='/api/export?'+new URLSearchParams({snapshot:selected.id});$('export-model').download=selected.model+'-snapshot'+(selected.id.startsWith('candidate:')?'.json':'.json.gz');}worldLimits();goalMode();$('reset-learning').disabled=!selected;streamAvailability();}
 function goalMode(){const selected=state.snapshots.find(o=>o.id===$('play-snapshot').value),puzzle=puzzleSize($('play-world').value);$('goal').disabled=puzzle||selected?.varying_goals===false&&$('policy').value==='animal';if($('goal').disabled)$('goal').value=puzzle?0:selected?.environment==='shifted'?50:0;}
 function groupPuzzlePanels(board,environment){
   const switchboard=environment==='switchboard';board.classList.toggle('switchboard',switchboard);
@@ -258,9 +270,9 @@ function play(){if(!playback)return;if(timer){pause();return;}if(frameIndex===pl
 async function runAttempt(event){event?.preventDefault();if(state.attemptBusy||!$('play-snapshot').value)return;clearStreamPreview();state.attemptBusy=true;streamAvailability();const epoch=state.attemptEpoch,snapshot=$('play-snapshot').value;$('attempt').disabled=true;$('again').disabled=true;$('reset-learning').disabled=true;$('play-error').textContent='';pause();try{const result=await api('/api/attempt',{snapshot,lifetime_id:playgroundLifetime,learning:$('play-learning').checked&&$('policy').value==='animal',start:Number($('start').value),goal:Number($('goal').value),seed:Number($('attempt-seed').value),policy:$('policy').value,world:$('play-world').value});if(epoch!==state.attemptEpoch)return;playback=result;if(result.learning)lifetimeStats=result.learning;learningStatus();frameIndex=0;drawWorld();$('scrub').disabled=false;['play','step','restart'].forEach(id=>$(id).disabled=false);renderFrame();play();}catch(e){if(epoch===state.attemptEpoch)$('play-error').textContent=e.message;}finally{state.attemptBusy=false;streamAvailability();$('attempt').disabled=!state.snapshots.length;$('again').disabled=!state.snapshots.length;$('reset-learning').disabled=!state.snapshots.length;}}
 $('attempt-form').onsubmit=runAttempt;$('again').onclick=()=>{$('attempt-seed').value=(Number($('attempt-seed').value)+1)%4294967296;runAttempt();};$('play').onclick=play;$('step').onclick=()=>{pause();step();};$('restart').onclick=()=>{pause();frameIndex=0;renderFrame();};$('scrub').oninput=()=>{pause();frameIndex=Number($('scrub').value);renderFrame();};$('speed').onchange=()=>{if(timer){pause();play();}};
 
-async function refresh(){if(state.busy)return;state.busy=true;try{state.runs=await api('/api/runs');state.populations=await api('/api/populations');renderLibrary();assessmentChoices();assessmentHistory();if(state.view==='assessments')await loadAssessment();$('connection').textContent='Updated '+new Date().toLocaleTimeString();$('connection').className='connection online';if(!state.selected&&state.runs.length)state.selected=state.runs[0].run;if(state.selected)await loadDetail();}catch(e){$('connection').textContent='Connection lost · retrying';$('connection').className='connection';}finally{state.busy=false;}}
+async function refresh(){if(state.busy)return;state.busy=true;try{state.runs=await api('/api/runs');state.populations=await api('/api/populations');renderLibrary();assessmentChoices();assessmentHistory();if(state.view==='assessments')await loadAssessment();$('connection').textContent='Updated '+new Date().toLocaleTimeString();$('connection').className='connection online';if(!state.selected&&currentRuns().length)state.selected=currentRuns()[0].run;if(state.selected)await loadDetail();}catch(e){$('connection').textContent='Connection lost · retrying';$('connection').className='connection';}finally{state.busy=false;}}
 $('refresh').onclick=refresh;
-async function init(){try{const boot=await api('/api/bootstrap');state.token=boot.token;state.runs=boot.runs;state.populations=await api('/api/populations');renderLibrary();assessmentChoices();assessmentHistory();if(state.view==='assessments')await loadAssessment();setupKind();const requested=new URLSearchParams(location.search).get('run');state.selected=state.runs.find(r=>r.run===requested||r.name===requested)?.run||state.runs[0]?.run||null;await refresh();}catch(e){$('connection').textContent=e.message;setupKind();}setInterval(refresh,3000);}
+async function init(){try{const boot=await api('/api/bootstrap');state.token=boot.token;state.runs=boot.runs;state.populations=await api('/api/populations');renderLibrary();assessmentChoices();assessmentHistory();if(state.view==='assessments')await loadAssessment();setupKind();const requested=new URLSearchParams(location.search).get('run');state.selected=state.runs.find(r=>r.run===requested||r.name===requested)?.run||currentRuns()[0]?.run||null;await refresh();}catch(e){$('connection').textContent=e.message;setupKind();}setInterval(refresh,3000);}
 init();
 let resizeTimer;window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(state.view==='overview'&&state.detail)chart(state.detail);if(state.view==='playground'&&playback){drawWorld();renderFrame();}},150);});
 
@@ -282,7 +294,7 @@ $('delete-session').onclick=async()=>{
   }catch(e){$('overview-error').textContent=e.message;}
 };
 
-// A stable, brain-shaped schematic. Only actual graph nodes are interactive.
+// Stable brain-shaped coordinates, relaxed toward actual graph connections.
 function brainHash(value,salt=0){let h=(2166136261^salt)>>>0;for(let i=0;i<value.length;i++){h^=value.charCodeAt(i);h=Math.imul(h,16777619);}h^=h>>>16;h=Math.imul(h,0x7feb352d);h^=h>>>15;h=Math.imul(h,0x846ca68b);return (h^(h>>>16))>>>0;}
 function brainSurface(u,v,side,layer=1){
   const theta=Math.acos(1-2*u),phi=(v-.5)*Math.PI;
@@ -293,7 +305,58 @@ function brainSurface(u,v,side,layer=1){
   return {x:side*(.065+.77*ring*Math.cos(phi)*fold*front*layer),
     y:y*layer,z:1.12*ring*Math.sin(phi)*fold*layer};
 }
+// Compute once per loaded graph, never during camera movement or playback.
+const brainLayoutCache=new WeakMap();
+function brainLocalize(graph,positions){
+  const mobile=[...positions.values()].filter(p=>p.n.kind==='state'||p.n.kind==='prediction')
+    .sort((a,b)=>a.n.id.localeCompare(b.n.id));
+  if(!mobile.length)return;
+  const links=new Map(mobile.map(p=>[p,[]])),degree=new Map(),springs=[];
+  const strengthByKind={successor:1,prediction:.42,embedding:.09,output:.09};
+  for(const e of [...(graph.edges||[])].sort((a,b)=>(a.source+'>'+a.target+':'+a.kind).localeCompare(b.source+'>'+b.target+':'+b.kind))){
+    const a=positions.get(e.source),b=positions.get(e.target),base=strengthByKind[e.kind];
+    if(!a||!b||a===b||!base||!Number.isFinite(e.value)||e.value===0)continue;
+    const strength=base*(e.kind==='successor'?1:Math.min(1,Math.abs(e.value)));
+    const link={a,b,strength};springs.push(link);
+    degree.set(a,(degree.get(a)||0)+strength);degree.set(b,(degree.get(b)||0)+strength);
+    links.get(a)?.push(link);links.get(b)?.push(link);
+  }
+  if(!springs.length)return;
+  for(const link of springs)link.strength/=Math.sqrt(Math.max(1,degree.get(link.a),degree.get(link.b)));
+  const cost=(p,location,other=null,otherLocation=null)=>{
+    let total=0;
+    for(const link of links.get(p)){
+      const neighbor=link.a===p?link.b:link.a,target=neighbor===other?otherLocation:neighbor;
+      const dx=location.x-target.x,dy=location.y-target.y,dz=location.z-target.z;
+      total+=link.strength*(dx*dx+dy*dy+dz*dz);
+    }
+    return total;
+  };
+  // Keep every original brain-shaped site occupied. Only exchange which node
+  // occupies a site, so connection localization cannot collapse the repertoire.
+  for(const kind of ['state','prediction']){
+    const pool=mobile.filter(p=>p.n.kind===kind),count=pool.length;
+    for(let pass=0;pass<12;pass++){
+      let swaps=0;
+      for(let i=0;i<count;i++){
+        const p=pool[i],before=cost(p,p);let best=null,bestDelta=-1e-10;
+        const samples=Math.min(count-1,48);
+        for(let sample=0;sample<samples;sample++){
+          const j=count<=49?(i+sample+1)%count:brainHash(p.n.id,pass*65537+sample*131+17)%count;
+          const q=pool[j];if(p===q)continue;
+          const delta=cost(p,q,q,p)+cost(q,p,p,q)-before-cost(q,q);
+          if(delta<bestDelta){best=q;bestDelta=delta;}
+        }
+        if(best){
+          const {x,y,z}=p;p.x=best.x;p.y=best.y;p.z=best.z;best.x=x;best.y=y;best.z=z;swaps++;
+        }
+      }
+      if(!swaps)break;
+    }
+  }
+}
 function brainLayout(graph){
+  if(brainLayoutCache.has(graph))return brainLayoutCache.get(graph);
   const positions=new Map(),groups={input:[],state:[],output:[],prediction:[]};
   graph.nodes.forEach(n=>groups[n.kind].push(n));
   for(const kind of ['state','prediction'])for(const n of groups[kind]){
@@ -314,6 +377,7 @@ function brainLayout(graph){
   });
   groups.output.forEach((n,i)=>positions.set(n.id,{n,x:1.66+.1*(i%2),
     y:.66-1.22*i/Math.max(1,groups.output.length-1),z:.12}));
+  brainLocalize(graph,positions);brainLayoutCache.set(graph,positions);
   return positions;
 }
 const brain = {graph:null, yaw:.28, pitch:.85, zoom:1, selected:null, points:[], epoch:0};
@@ -457,7 +521,7 @@ $('attempt-form').addEventListener('submit',clearBrain);
 // A stream frame overlays the graph only while its preview is active.
 let streamPreview=null,streamFrameIndex=0,streamEpoch=0,streamBusy=false;
 function streamAvailability(){
-  const enabled=$('play-model').value==='senses'&&Boolean($('play-snapshot').value)&&state.snapshots.length>0;
+  const enabled=['agent-x','agent-y'].includes($('play-model').value)&&Boolean($('play-snapshot').value)&&state.snapshots.length>0;
   for(const id of ['stream-file','stream-max','stream-window'])$(id).disabled=!enabled||streamBusy;
   $('stream-inspect').disabled=!enabled||streamBusy||state.attemptBusy||!$('stream-file').files?.length;
   $('stream-clear').disabled=!streamPreview&&!streamBusy;

@@ -19,6 +19,29 @@ NONE = MutationConfig(weight_probability=0, subtree_probability=0, term_probabil
 
 
 class TrainingTests(unittest.TestCase):
+    def test_streamed_provenance_matches_previous_saving_and_resume(self):
+        from static_agent_training.genome import Species
+        from static_agent_training.populations import read_population
+        import gzip
+        original = Species.to_data
+        with tempfile.TemporaryDirectory() as tmp:
+            baseline, optimized = Path(tmp) / 'baseline', Path(tmp) / 'optimized'
+            config = self.config(generations=2)
+            with patch.object(Species, 'to_data', lambda self, **kwargs: original(self)):
+                run_experiment(config, baseline, until_generation=1)
+                expected = run_experiment(config, baseline, resume=True)
+            run_experiment(config, optimized, until_generation=1)
+            actual = run_experiment(config, optimized, resume=True)
+            self.assertEqual(expected, actual)
+            for generation in range(2):
+                name = f'generations/{generation:05d}.json'
+                self.assertEqual((baseline / name).read_bytes(), (optimized / name).read_bytes())
+                name = f'traces/{generation:05d}-champion.json.gz'
+                self.assertEqual(json.loads(gzip.decompress((baseline / name).read_bytes())),
+                                 json.loads(gzip.decompress((optimized / name).read_bytes())))
+            self.assertEqual(read_population(baseline / 'best-population.json.gz')['members'],
+                             read_population(optimized / 'best-population.json.gz')['members'])
+
     def config(self, **kwargs):
         return replace(TrainingConfig(population=3, generations=3, episodes=3,
                                       assessment_episodes=3, elites=1, initial_pairs=2,

@@ -2,6 +2,7 @@
 
 from dataclasses import asdict, dataclass, replace
 import hashlib
+from functools import cached_property
 from . import serialization as json
 
 from .initialize import is_closed
@@ -43,18 +44,33 @@ class Species:
         object.__setattr__(self, 'initial_pairs', pairs)
         object.__setattr__(self, 'budgets', budgets)
 
-    @property
+    @cached_property
     def genotype_id(self):
+        # Derived values are not dataclass fields: replace() starts with an empty
+        # cache. Only immutable results are retained, for this instance alone.
         payload = dict(initial_pairs=self.initial_pairs, budgets=self.budgets,
                        mappings=self.inherited.to_data(), development_config=asdict(self.development_config))
         return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
-    def to_data(self):
+    @cached_property
+    def _merger_identities(self):
+        # Keep no parsed JSON alive or available to serialization callers.
+        return _mergers(json.loads(self.development_json))
+
+    @cached_property
+    def _encoded_development(self):
+        # Validation is paid once per immutable agent, with no decoded tree kept.
+        # dataclasses.replace creates a fresh cache when provenance changes.
+        return json.EncodedJSON(self.development_json)
+
+    def to_data(self, *, encoded_development=False):
+        """Return plain data, or streaming-only data for serialization.dump()."""
         return dict(schema_version='crt-species-v1', initial_pairs=self.initial_pairs,
                     budgets=self.budgets, inherited=self.inherited.to_data(),
                     repertoire=self.repertoire.to_data(),
                     development_config=asdict(self.development_config),
-                    development=json.loads(self.development_json))
+                    development=(self._encoded_development if encoded_development
+                                 else json.loads(self.development_json)))
 
     @classmethod
     def from_data(cls, data):
@@ -108,3 +124,12 @@ def inherit_lifetime_mappings(parent, embedding, output):
     inherited=parent.inherited
     mappings=InheritedMappings(inherited.observations,inherited.outputs,inherited.pair_ids,embedding,output)
     return replace(parent,inherited=mappings)
+
+
+def _mergers(development):
+    """Immutable merger identities, independent of development list indices."""
+    from .initialize import pair_id
+
+    seeds = [pair_id(*p) for p in development['initial_pairs']]
+    return frozenset((e['pair_id'], tuple(sorted(seeds[i] for i in e['sources'])))
+                     for e in development['events'] if e['kind'] == 'MERGE')

@@ -1,5 +1,7 @@
 # Implementation and experiment boundaries
 
+Current architecture (reviewed 2026-11-22): [architecture reference](ARCHITECTURE.md). The baseline details below concern categorical agents. Agent X uses local receptor signals, regional activations and separate sensory learning rules. Current persistence and CPU execution details are in the architecture reference.
+
 This describes the baseline implementation, with artifact/command updates on
 2026-11-02. The separate [fixed-senses variant](AGNOSTIC_INTERFACE.md) has its own
 interface and learning rules. See [usage](../USE.md) for commands and

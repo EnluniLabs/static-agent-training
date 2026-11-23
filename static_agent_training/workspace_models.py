@@ -82,13 +82,25 @@ class WorkspaceModels:
         if model == 'senses':
             from .brain_scan import sensory_geometry
             for option in options:
-                _, snapshot, _ = self.load(option['id'])
-                saved = BitModel.from_data(snapshot)
-                if saved.senses is not None:
+                if option['id'].startswith('candidate:'):
+                    # Discovery uses saved apparatus metadata, not full champion
+                    # histories and model construction for every dropdown entry.
+                    from .experimental.apparatus import make_senses
+                    from .populations import sensory_apparatus
+                    apparatus = sensory_apparatus(config)
+                    senses = make_senses(**apparatus)
+                    geometry = sensory_geometry(senses, apparatus['sensory_partitions'])
+                    agent_y = config.get('agent_y', False)
+                else:
+                    _, snapshot, _ = self.load(option['id'])
+                    saved = BitModel.from_data(snapshot)
+                    if saved.senses is None:
+                        continue
                     geometry = sensory_geometry(saved.senses, saved.sensory_partitions)
-                    option.update(sensory_geometry=geometry, sensory_interface=geometry['interface'],
-                                  retina_width=geometry['width'], retina_height=geometry['height'],
-                                  sensory_partitions=geometry['partitions'])
+                    agent_y = snapshot.get('schema_version') == 'crt-agent-y-v3'
+                option.update(agent_y=agent_y, sensory_geometry=geometry, sensory_interface=geometry['interface'],
+                              retina_width=geometry['width'], retina_height=geometry['height'],
+                              sensory_partitions=geometry['partitions'])
         return options
 
     def load(self, identifier):
@@ -114,7 +126,7 @@ class WorkspaceModels:
         with gzip.open(path, 'rt') as handle:
             data = json.load(handle)
         schema = data.get('schema_version')
-        if schema == 'crt-bit-model-v1':
+        if schema in ('crt-bit-model-v1', 'crt-agent-y-v3'):
             # Keep revision eligibility for optional learning; omit historical traces.
             data.update(events=[])
             return 'senses', data, path
@@ -138,7 +150,7 @@ class WorkspaceModels:
             session = self.lifetimes.get(key)
             if session is not None and session['snapshot'] == identifier:
                 model = session['model']
-                graph = (mapping_graph(model.repertoire, parameters=model.parameters(), sensory_partitions=model.sensory_partitions, senses=model.senses)
+                graph = (mapping_graph(model.repertoire, parameters=model.parameters(), sensory_partitions=model.sensory_partitions, senses=model.senses, learned_grouping=hasattr(model, 'router_weights'), partition=getattr(model, 'partition', None))
                          if isinstance(model, BitModel) else
                          mapping_graph(model.repertoire, mappings=model.mappings))
                 return dict(graph, source='Current playground lifetime', attempts=session['attempts'],
@@ -147,7 +159,7 @@ class WorkspaceModels:
             kind, snapshot, _ = self.load(identifier)
             if kind == 'senses':
                 model = BitModel.from_data(snapshot)
-                graph = mapping_graph(model.repertoire, parameters=model.parameters(), sensory_partitions=model.sensory_partitions, senses=model.senses)
+                graph = mapping_graph(model.repertoire, parameters=model.parameters(), sensory_partitions=model.sensory_partitions, senses=model.senses, learned_grouping=hasattr(model, 'router_weights'), partition=getattr(model, 'partition', None))
             elif kind == 'candidate':
                 species = Species.from_data(snapshot['individual'])
                 maps = species.inherited.lifetime()
@@ -214,7 +226,7 @@ class WorkspaceModels:
         model.embedding_rng.seed(derive(seed, 'stream-preview', 'embedding'))
         model.output_rng.seed(derive(seed, 'stream-preview', 'output'))
         graph = mapping_graph(model.repertoire, parameters=model.parameters(),
-                              sensory_partitions=model.sensory_partitions, senses=model.senses)
+                              sensory_partitions=model.sensory_partitions, senses=model.senses, learned_grouping=hasattr(model, 'router_weights'), partition=getattr(model, 'partition', None))
         preview = run_stream(model, payload, window_bytes=data.get('window_bytes'),
                              frame_limit=limit, learn=False)
         return dict(preview, source='Frozen stream copy', origin=origin, graph=graph,

@@ -1,5 +1,7 @@
 # Enluni Labs — Artificial Animal Research Roadmap
 
+Scope: dated measurement, audit or research design; its results and proposals are retained as historical evidence. Current implemented behavior: [architecture reference](ARCHITECTURE.md), reviewed 2026-11-22.
+
 **Recorded:** 2026-11-02  
 **Status:** Proposed research plan, not a claim of demonstrated capability.  
 **Repository:** `EnluniLabs/static-agent-training`  

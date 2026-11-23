@@ -1,5 +1,7 @@
 # Historical fixed retinal apparatus
 
+Current system context and model boundaries: [architecture reference](ARCHITECTURE.md), reviewed 2026-11-22.
+
 This document describes the historical `retina` packed-pixel drawing interface,
 retained explicitly for snapshot compatibility. New Agent X sessions use
 [Receptor signals](RECEPTOR_SIGNALS.md), not this camera interface.

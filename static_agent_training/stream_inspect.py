@@ -47,7 +47,7 @@ def _load_model(path):
         data = json.load(source)
     if not isinstance(data, dict):
         raise ValueError('snapshot must be a BitModel object or bundle with learned_model')
-    return BitModel.from_data(data.get('learned_model', data))
+    return BitModel.from_data(data.get('learned_model', data.get('model', data)))
 
 
 def _validate_output(options):
