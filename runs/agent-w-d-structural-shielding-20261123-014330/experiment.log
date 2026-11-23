@@ -1,0 +1,34 @@
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/enluni/projects/static-agent-training/static_agent_training/experimental/wd_structural_shielding.py", line 320, in <module>
+    execute(args.output,args.workers)
+    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/enluni/projects/static-agent-training/static_agent_training/experimental/wd_structural_shielding.py", line 205, in execute
+    verify_remap(AgentW.from_data(original_records['w'][0]['individual']))
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/enluni/projects/static-agent-training/static_agent_training/experimental/wd_structural_shielding.py", line 173, in verify_remap
+    assert x['successes']==y['successes'] and x['rounds']==y['rounds'] and x['actions']==y['actions']
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+Baselines exact. Remap equivalent. Non-isomorphic controls matched within 3 points: 18 /19
+All split-RNG and frozen probe smoke checks passed.
+38/684 trajectories complete.
+76/684 trajectories complete.
+114/684 trajectories complete.
+152/684 trajectories complete.
+190/684 trajectories complete.
+228/684 trajectories complete.
+266/684 trajectories complete.
+304/684 trajectories complete.
+342/684 trajectories complete.
+380/684 trajectories complete.
+418/684 trajectories complete.
+456/684 trajectories complete.
+494/684 trajectories complete.
+532/684 trajectories complete.
+570/684 trajectories complete.
+608/684 trajectories complete.
+646/684 trajectories complete.
+684/684 trajectories complete.
+ALL TRAJECTORIES COMPLETE
