@@ -17,7 +17,7 @@ from .agent_z_experiment import sample_tasks
 
 def run(directory, *, seed=7, population=1000, generations=1000, episodes=500, regions=2,
         structure_preset='baseline', speciation=False, action_rate=.05, structural_rate=.05,
-        model='agent-w', initial_nodes=None):
+        model='agent-w', initial_nodes=None, environment='original', initial_members=None):
     if min(population, generations, episodes) < 1 or not 1 <= regions <= 8:
         raise ValueError('positive population, generations and episodes and 1–8 regions required')
     from math import isfinite
@@ -47,8 +47,21 @@ def run(directory, *, seed=7, population=1000, generations=1000, episodes=500, r
     mutation = config.mutation
     actions = NumberLine().action_signals
     rng = random.Random(seed)
-    goals = partitions(seed, include_zero=True)
-    held_out = sample_tasks(f'{seed}:test', episodes, goals['assessment'])
+    if environment == 'original':
+        goals = partitions(seed, include_zero=True)
+
+        def task_batch(label, assessment=False):
+            return sample_tasks(label, episodes, goals['assessment' if assessment else 'training'])
+    elif environment == 'lights-out-2x2':
+        from ..lights_out import sample_tasks as puzzle_tasks
+
+        def task_batch(label, assessment=False):
+            return puzzle_tasks(label, episodes, environment=environment)
+    else:
+        raise ValueError('unsupported Agent W/D evolution environment')
+    if environment != 'original':
+        settings['environment'] = environment
+    held_out = task_batch(f'{seed}:test', assessment=True)
     rates = dict(action_rate=action_rate, structural_rate=structural_rate)
     frozen = dict(action_rate=0, structural_rate=0)
 
@@ -88,7 +101,23 @@ def run(directory, *, seed=7, population=1000, generations=1000, episodes=500, r
                      perturb=rng.random() < mutation.weight_probability)
 
     agents = []
-    for _ in range(population):
+    if initial_members is not None:
+        from ..repertoire import freeze
+        if len(initial_members) != population:
+            raise ValueError('the seeded population must fill all population slots')
+        for record in initial_members:
+            agent = model_type.from_data(record['individual'])
+            if agent.actions != actions or agent.regions != regions:
+                raise ValueError('seeded model has a different action alphabet or region count')
+            seeds, budgets = record.get('seeds'), record.get('budgets')
+            if model == 'agent-w':
+                if not seeds or not budgets or len(seeds) != len(budgets):
+                    raise ValueError('Agent W founders require their original seed pairs and budgets')
+                seeds = [tuple(map(freeze, pair)) for pair in seeds]
+            agents.append((agent, seeds, budgets))
+        settings['seeded_population'] = True
+        settings.pop('initial_nodes', None)
+    for _ in range(len(agents), population):
         if model == 'agent-d':
             agents.append(build(None, None, existing=RandomGraph.generate(initial_nodes, rng)))
             continue
@@ -111,13 +140,13 @@ def run(directory, *, seed=7, population=1000, generations=1000, episodes=500, r
 
     save_checkpoint()
     for generation in range(generations):
-        tasks = sample_tasks(f'{seed}:train:{generation}', episodes, goals['training'])
+        tasks = task_batch(f'{seed}:train:{generation}')
         seed_label = f'{seed}:learn:{generation}'
-        scores = [agent.evaluate(tasks, seed=seed_label, **rates)['successes'] for agent, _, _ in agents]
+        scores = [agent.evaluate(tasks, seed=seed_label, environment=environment, **rates)['successes'] for agent, _, _ in agents]
         ranks = sorted(range(population), key=lambda i: -scores[i])
         champion = agents[ranks[0]][0]
-        evaluation = champion.evaluate(held_out, seed=f'{seed}:assessment', **rates)
-        fixed = champion.evaluate(held_out, seed=f'{seed}:assessment', **frozen) if any(rates.values()) else evaluation
+        evaluation = champion.evaluate(held_out, seed=f'{seed}:assessment', environment=environment, **rates)
+        fixed = champion.evaluate(held_out, seed=f'{seed}:assessment', environment=environment, **frozen) if any(rates.values()) else evaluation
         row = dict(generation=generation + 1, mean=sum(scores) / (episodes * population),
                    best=scores[ranks[0]] / episodes, held_out=evaluation['successes'] / episodes,
                    held_out_frozen=fixed['successes'] / episodes,
@@ -128,6 +157,13 @@ def run(directory, *, seed=7, population=1000, generations=1000, episodes=500, r
         history.append(row)
         write_json(directory / 'snapshots' / f'{generation + 1:05}.json.gz', champion.to_data())
         write_json(directory / 'summaries' / f'{generation + 1:05}.json', row)
+        if initial_members is not None and generation + 1 == generations:
+            write_json(directory / 'final-population.json.gz', dict(
+                schema_version=f'crt-{model}-evolved-population-v1', settings=settings,
+                generation=generation + 1, members=[
+                    dict(individual=agents[i][0].to_data(), seeds=agents[i][1],
+                         budgets=agents[i][2], training_success=scores[i] / episodes)
+                    for i in ranks]))
         if groups is None:
             parents = [agents[i] for i in ranks[:max(1, population // 4)]]
             agents = [parents[0]] + [offspring(rng.choice(parents)) for _ in range(population - 1)]
