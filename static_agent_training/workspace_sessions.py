@@ -17,6 +17,7 @@ from .structure_profiles import STRUCTURE_PRESETS
 
 
 KINDS = {
+    'agent-q-training': ('Agent Q evolution', 'static_agent_training.experimental.agent_q_experiment'),
     'agent-z-training': ('Agent Z evolution', 'static_agent_training.experimental.agent_z_experiment'),
     'training': ('Baseline evolution', 'static_agent_training.experiment'),
     'sensory-training': ('Fixed-senses evolution', 'static_agent_training.experiment'),
@@ -147,11 +148,14 @@ class SessionManager:
     def command(self, kind, config, directory):
         if kind not in KINDS or not isinstance(config, dict):
             raise ValueError('Choose a supported session type and configuration')
-        if kind == 'agent-z-training':
+        if kind in ('agent-z-training','agent-q-training'):
+            family = kind.removesuffix('-training')
             allowed = {'population', 'generations', 'episodes', 'regions', 'seed',
                        'structure_preset', 'learning', 'notes', 'initial_population', 'speciation'}
+            if family == 'agent-q':
+                allowed.add('exploration')
             if set(config) - allowed:
-                raise ValueError('Choose supported Agent Z session settings')
+                raise ValueError(f'Choose supported {family} session settings')
             preset, learning = config.get('structure_preset', 'baseline'), config.get('learning', 'both')
             if preset not in ('baseline', 'exploratory') or learning not in ('both', 'off', 'empirical', 'structural'):
                 raise ValueError('Unknown Agent Z structure preset or learning mode')
@@ -161,15 +165,20 @@ class SessionManager:
                     ('generations', 50, 1, 1000000), ('episodes', 500, 1, 1000000),
                     ('regions', 2, 1, 8), ('seed', 7, 0, 2**32 - 1)):
                 args += ['--' + key, str(integer(config, key, default, low, high))]
+            if family == 'agent-q':
+                exploration = config.get('exploration', .05)
+                if type(exploration) not in (int,float) or not 0 <= exploration <= 1:
+                    raise ValueError('Agent Q exploration must be between zero and one')
+                args += ['--exploration',str(exploration)]
             if boolean(config, 'speciation', False):
                 args.append('--speciation')
             if config.get('initial_population'):
                 from .populations import read_population
                 source = self.population_path(config['initial_population'])
                 payload = read_population(source)
-                if payload['schema_version'] != 'crt-agent-z-population-v1' or not all(
+                if payload['schema_version'] != f'crt-{family}-population-v1' or not all(
                         'seeds' in row and 'budgets' in row for row in payload['members']):
-                    raise ValueError('Choose an Agent Z population saved with development seeds')
+                    raise ValueError(f'Choose a {family} population saved with development seeds')
                 if payload['config']['sensory_partitions'] != integer(config, 'regions', 2, 1, 8):
                     raise ValueError('Agent Z population must use the requested number of regions')
                 args += ['--initial-population', str(source)]
@@ -447,12 +456,12 @@ class SessionManager:
             record = self.get(identifier)
             if record['state'] in ('running', 'stopping'):
                 raise ValueError('This session is still active')
-            if record['state'] == 'completed' and (record['kind'] not in (*TRAINING, 'agent-z-training') or generations is None):
+            if record['state'] == 'completed' and (record['kind'] not in (*TRAINING, 'agent-z-training', 'agent-q-training') or generations is None):
                 raise ValueError('A completed baseline session needs a larger generation target')
             if any(r['directory'] == record['directory'] and r['state'] in ('running', 'stopping') for r in self.records()):
                 raise ValueError('This run already has an active session')
             kind, directory = record['kind'], Path(record['directory'])
-            if kind == 'agent-z-training':
+            if kind in ('agent-z-training','agent-q-training'):
                 report = read_json(directory / 'report.json')
                 old = report.get('config', {}).get('generations', 50)
                 target = old if generations is None else integer({'generations': generations}, 'generations', old)
@@ -461,7 +470,7 @@ class SessionManager:
                 if not (directory / 'checkpoint.json.gz').is_file():
                     raise ValueError('This session has not saved a resumable checkpoint yet')
                 if backend not in (None, 'native'):
-                    raise ValueError('Agent Z sessions use the native CPU')
+                    raise ValueError('These sessions use the native CPU')
                 return self.spawn(kind, directory, ['--resume', str(directory), '--generations', str(target)],
                                   name=record['name'], config=dict(record['config'], generations=target),
                                   previous=identifier)

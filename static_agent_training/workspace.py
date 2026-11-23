@@ -57,8 +57,8 @@ class Workspace:
                                      state=job['state'], updated=job['created'], progress=None, summary=None, session=job))
                     known.add(job['directory'])
             for row in rows:
-                if row['kind'] == 'agent-z-training':
-                    row['model_family'] = 'agent-z'
+                if row['kind'] in ('agent-z-training','agent-q-training'):
+                    row['model_family'] = row['kind'].removesuffix('-training')
                 if row['kind'] == 'sensory-training':
                     saved = read_json(Path(row['path']) / 'config.json').get('config', {})
                     settings = saved or row.get('session', {}).get('config', {})
@@ -92,8 +92,8 @@ class Workspace:
         schema = report.get('schema_version', '')
         from .workspace_agent_z import legacy_result
         legacy = legacy_result(directory) if not report else {}
-        if schema == 'crt-agent-z-run-v1' or legacy:
-            result['kind'] = 'agent-z-training'
+        if schema in ('crt-agent-z-run-v1','crt-agent-q-run-v1') or legacy:
+            result['kind'] = 'agent-q-training' if schema == 'crt-agent-q-run-v1' else 'agent-z-training'
             result['config'] = report.get('config', legacy.get('settings', {}))
             columns = [['mean', 'Mean training'], ['held_out', 'Champion held-out'],
                        ['best', 'Best training']]
@@ -198,7 +198,7 @@ class Workspace:
             import uuid
             directory = self.sessions.path(data.get('run'))
             output = self.root/'runs/populations'/(datetime.now().strftime('%Y%m%d-%H%M%S-')+uuid.uuid4().hex[:8]+'.json.gz')
-            if self.detail(data.get('run')).get('kind') == 'agent-z-training':
+            if self.detail(data.get('run')).get('kind') in ('agent-z-training','agent-q-training'):
                 from .workspace_agent_z import save_population as save_z_population
                 result = save_z_population(directory, output, count=data.get('count', 10),
                                            name=data.get('name') or directory.name)

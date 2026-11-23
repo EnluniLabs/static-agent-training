@@ -60,9 +60,10 @@ def catalog(root, *, processes=None):
         report = read_json(path)
         schema = report.get('schema_version', '')
         progress = None
-        if schema == 'crt-agent-z-run-v1':
-            kind = 'agent-z-training'
-            state = sensory_state(path.parent, report, module='static_agent_training.experimental.agent_z_experiment')
+        if schema in ('crt-agent-z-run-v1','crt-agent-q-run-v1'):
+            family = schema.split('-')[2]
+            kind = f'agent-{family}-training'
+            state = sensory_state(path.parent, report, module=f'static_agent_training.experimental.agent_{family}_experiment')
             files = sorted((path.parent / 'summaries').glob('*.json'))
             summary = read_json(files[-1]) if files else {}
             progress = f"{summary.get('generation', 0)}/{report['config']['generations']}"

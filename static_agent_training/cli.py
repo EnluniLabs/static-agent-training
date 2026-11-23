@@ -24,6 +24,7 @@ Inspect and organize (no experiments launched):
 
 Run tools (only when explicitly invoked):
   agent-d [options]         Run Agent D evolution
+  agent-q [options]         Run or assess Agent Q
   agent-z [options]         Run or assess Agent Z
   train [--model senses]     Evolutionary training for either model
   resume [RUN] [options]     Resume evolutionary training
@@ -91,7 +92,7 @@ def main(root, argv=None):
         return
     command, args = args[0], args[1:]
     try:
-        if command in ('agent-d', 'agent-z'):
+        if command in ('agent-d', 'agent-z', 'agent-q'):
             execute('static_agent_training.experimental.' + command.replace('-', '_') + '_experiment', args)
             return
         if command == 'runs':

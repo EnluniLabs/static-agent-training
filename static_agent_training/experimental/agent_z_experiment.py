@@ -27,7 +27,7 @@ def read_z_artifact(path):
 
 
 def build(seeds, budgets, rng, kernels, regions, config, *, parent=None,
-          inherited_structure=None, mutate_weights=True):
+          inherited_structure=None, mutate_weights=True, family="agent-z", exploration=.05):
     structure, stops = inherited_structure or Structure.develop(
         seeds, budget=budgets, seed=rng.getrandbits(64),
         max_nodes=config.development.max_nodes,
@@ -35,11 +35,19 @@ def build(seeds, budgets, rng, kernels, regions, config, *, parent=None,
 
     def weights(key, name, size):
         if parent is not None and key in parent.index:
-            row = getattr(parent, name)[parent.index[key]]
+            row = (getattr(parent, name)[parent.index[key]] if name != 'expectations' else
+                   [v for action in parent.expectations[parent.index[key]] for v in action])
             return ([value + rng.gauss(0, config.mutation.weight_stddev) for value in row]
                     if mutate_weights else row)
         return [rng.gauss(0, 0.5) for _ in range(size)]
 
+    if family == 'agent-q':
+        from .agent_q import AgentQ
+        rows = [weights(key, 'expectations', 72) for key in structure.pairs]
+        agent = AgentQ(structure, [weights(key, 'embedding', 9) for key in structure.pairs],
+                       [[row[i:i+8] for i in range(0,72,8)] for row in rows],
+                       regions=regions, exploration=exploration, kernels=kernels)
+        return agent, stops
     agent = AgentZ(structure, [weights(key, 'embedding', 9) for key in structure.pairs],
                    [weights(key, 'continuation', 8) for key in structure.pairs],
                    regions=regions, kernels=kernels)
@@ -90,12 +98,25 @@ def sample_tasks(seed, count, goals):
 
 
 def run(*, seed=7, backend='native', generations=3, population=8, episodes=30,
-        regions=2, learning='both', candidate=None, structure_preset='baseline', progress=None, directory=None, resume=False, initial_population=None, speciation=False):
+        regions=2, learning='both', candidate=None, structure_preset='baseline', progress=None, directory=None, resume=False, initial_population=None, speciation=False, family='agent-z', exploration=.05):
+    if family == 'agent-q' and not 0 <= exploration <= 1:
+        raise ValueError('Agent Q exploration must be between zero and one')
     if min(generations, population, episodes) < 1 or not 1 <= regions <= 8:
         raise ValueError('positive generations, population and episodes required; regions must be 1–8')
+    agent_type, run_lifetime = AgentZ, evaluate
     kernels = NativeKernels() if backend == 'native' else PythonKernels()
+    if family == 'agent-q':
+        from .agent_q import AgentQ, evaluate as evaluate_q
+        from .agent_q_accelerated import NativeQ
+        agent_type = AgentQ
+        kernels = NativeQ() if backend == 'native' else None
+        run_lifetime = kernels.evaluate if kernels is not None else evaluate_q
+    elif family != 'agent-z':
+        raise ValueError('unknown training agent family')
     settings = dict(seed=seed, generations=generations, population=population,
                     episodes=episodes, regions=regions, learning=learning, structure_preset=structure_preset)
+    if family == 'agent-q':
+        settings['exploration'] = exploration
     if speciation:
         settings['speciation'] = True
     if initial_population is not None:
@@ -113,8 +134,8 @@ def run(*, seed=7, backend='native', generations=3, population=8, episodes=30,
     start = perf_counter()
     held_out = sample_tasks(f'{seed}:test', episodes, test_goals)
     if candidate is not None:
-        agent = AgentZ.from_data(candidate, kernels=kernels)
-        assessment = evaluate(agent, held_out, seed=f'{seed}:assessment', learning=learning)
+        agent = agent_type.from_data(candidate, kernels=kernels)
+        assessment = run_lifetime(agent, held_out, seed=f'{seed}:assessment', learning=learning)
         return dict(settings=settings, assessment=assessment, seconds=perf_counter() - start)
 
     if directory is not None:
@@ -126,7 +147,7 @@ def run(*, seed=7, backend='native', generations=3, population=8, episodes=30,
     def checkpoint():
         if directory is not None:
             write_json(directory / 'checkpoint.json.gz', dict(
-                schema_version='crt-agent-z-checkpoint-v1', settings=settings, history=history,
+                schema_version=f'crt-{family}-checkpoint-v1', settings=settings, history=history,
                 **({'niches': niches.to_data()} if niches is not None else {}),
                 rng=rng.getstate(), population=[
                     dict(individual=agent.to_data(), seeds=seeds, budgets=budgets, stops=stops)
@@ -137,29 +158,31 @@ def run(*, seed=7, backend='native', generations=3, population=8, episodes=30,
         from ..agent_z_speciation import Niches
     if resume:
         saved = read_z_artifact(directory / 'checkpoint.json.gz')
-        if saved.get('schema_version') != 'crt-agent-z-checkpoint-v1':
-            raise ValueError('Expected an Agent Z training checkpoint')
+        if saved.get('schema_version') != f'crt-{family}-checkpoint-v1':
+            raise ValueError(f'Expected a {family} training checkpoint')
         if settings | {'generations': saved['settings']['generations']} != saved['settings']:
-            raise ValueError('Resume must retain the saved Agent Z settings')
+            raise ValueError('Resume must retain the saved training settings')
         if speciation:
             niches = Niches(population, saved['niches'])
         history = saved['history']
         version, state, gaussian = saved['rng']
         rng.setstate((version, tuple(state), gaussian))
-        agents = [(AgentZ.from_data(row['individual'], kernels=kernels),
+        agents = [(agent_type.from_data(row['individual'], kernels=kernels),
                    [tuple(map(freeze, pair)) for pair in row['seeds']], row['budgets'], row['stops'])
                   for row in saved['population']]
     else:
         if initial_population is not None:
             saved = read_z_artifact(initial_population)
-            if saved.get('schema_version') != 'crt-agent-z-population-v1':
-                raise ValueError('Choose a saved Agent Z population')
+            if saved.get('schema_version') != f'crt-{family}-population-v1':
+                raise ValueError(f'Choose a saved {family} population')
             for member in saved['members'][:population]:
                 if 'seeds' not in member or 'budgets' not in member:
                     raise ValueError('This legacy Agent Z champion can be assessed but has no development seeds')
                 seeds = [tuple(map(freeze, pair)) for pair in member['seeds']]
                 budgets = member['budgets']
-                agent = AgentZ.from_data(member['individual'], kernels=kernels)
+                agent = agent_type.from_data(member['individual'], kernels=kernels)
+                if family == 'agent-q':
+                    agent.exploration = exploration
                 if agent.regions != regions:
                     raise ValueError('Agent Z population must use the requested number of regions')
                 if any(len(term) < 2 for pair in seeds for term in pair):
@@ -168,7 +191,8 @@ def run(*, seed=7, backend='native', generations=3, population=8, episodes=30,
         for _ in range(len(agents), population):
             seeds = [pair() for _ in range(config.initial_pairs)]
             budgets = [config.chain_budget] * len(seeds)
-            agent, stops = build(seeds, budgets, rng, kernels, regions, config)
+            agent, stops = build(seeds, budgets, rng, kernels, regions, config, family=family,
+                                 exploration=exploration)
             agents.append((agent, seeds, budgets, stops))
         if speciation:
             niches = Niches(population)
@@ -178,12 +202,12 @@ def run(*, seed=7, backend='native', generations=3, population=8, episodes=30,
         raise ValueError('Choose a target greater than the saved generation count')
     for generation in range(len(history), generations):
         tasks = sample_tasks(f'{seed}:train:{generation}', episodes, train_goals)
-        results = [evaluate(agent, tasks, seed=f'{seed}:learn:{generation}', learning=learning)
+        results = [run_lifetime(agent, tasks, seed=f'{seed}:learn:{generation}', learning=learning)
                    for agent, _, _, _ in agents]
         ranks = sorted(range(population), key=lambda index: -results[index]['successes'])
         champion, _, _, stops = agents[ranks[0]]
-        assessment = evaluate(champion, held_out, seed=f'{seed}:assessment', learning=learning)
-        frozen = assessment if learning == 'off' else evaluate(
+        assessment = run_lifetime(champion, held_out, seed=f'{seed}:assessment', learning=learning)
+        frozen = assessment if learning == 'off' else run_lifetime(
             champion, held_out, seed=f'{seed}:assessment', learning='off')
         history.append(dict(generation=generation + 1,
                             mean=sum(r['successes'] for r in results) / (episodes * population),
@@ -201,8 +225,8 @@ def run(*, seed=7, backend='native', generations=3, population=8, episodes=30,
             write_json(directory / 'snapshots' / f'{generation + 1:05d}.json.gz', champion.to_data())
             write_json(directory / 'summaries' / f'{generation + 1:05d}.json', history[-1])
             write_json(directory / 'best-population.json.gz', dict(
-                schema_version='crt-agent-z-population-v1', name=directory.name,
-                config=dict(model='agent-z', environment='original', sensory_partitions=regions),
+                schema_version=f'crt-{family}-population-v1', name=directory.name,
+                config=dict(model=family, environment='original', sensory_partitions=regions),
                 source_type='generation', members=[
                     dict(individual=agents[i][0].to_data(), generation=generation,
                          training_success=results[i]['successes'] / episodes,
@@ -221,7 +245,8 @@ def run(*, seed=7, backend='native', generations=3, population=8, episodes=30,
             unchanged = seeds == inherited_seeds and budgets == inherited_budgets
             agent, stops = build(seeds, budgets, rng, kernels, regions, config, parent=parent,
                                  inherited_structure=(parent.structure, stops) if unchanged else None,
-                                 mutate_weights=rng.random() < mutation.weight_probability)
+                                 mutate_weights=rng.random() < mutation.weight_probability,
+                                 family=family, exploration=exploration)
             return agent, seeds, budgets, stops
 
         if niches is None:
@@ -247,7 +272,7 @@ def run(*, seed=7, backend='native', generations=3, population=8, episodes=30,
                 seconds=perf_counter() - start)
 
 
-def main():
+def main(family='agent-z'):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--backend', choices=('python', 'native'), default='native')
     parser.add_argument('--learning', choices=('both', 'off', 'empirical', 'structural'), default='both')
@@ -264,12 +289,14 @@ def main():
     mode.add_argument('--workspace-directory', type=Path)
     mode.add_argument('--resume', type=Path)
     parser.add_argument('--output', type=Path, help='save the result and champion')
+    if family == 'agent-q':
+        parser.add_argument('--exploration', type=float, default=.05)
     args = parser.parse_args()
     directory = args.workspace_directory or args.resume
     if args.resume:
         saved = read_z_artifact(directory / 'checkpoint.json.gz')
-        if saved.get('schema_version') != 'crt-agent-z-checkpoint-v1':
-            parser.error('Expected an Agent Z training checkpoint')
+        if saved.get('schema_version') != f'crt-{family}-checkpoint-v1':
+            parser.error(f'Expected a {family} training checkpoint')
         target = args.generations
         for key, value in saved['settings'].items():
             setattr(args, key, value)
@@ -281,7 +308,7 @@ def main():
     if args.candidate is not None:
         candidate = read_z_artifact(args.candidate)
         candidate = candidate.get('champion', candidate)
-    print(f'Agent Z: number line -20 to 20, {args.structure_preset}, '
+    print(f'Agent {family[-1].upper()}: number line -20 to 20, {args.structure_preset}, '
           f'{args.population} agents, {args.generations} generations, '
           f'{args.episodes} learning episodes per agent per generation', flush=True)
 
@@ -293,17 +320,19 @@ def main():
 
     keys = ('seed', 'backend', 'generations', 'population', 'episodes', 'regions', 'learning', 'structure_preset', 'initial_population', 'speciation')
     settings = {key: getattr(args, key) for key in keys}
+    if family == 'agent-q':
+        settings['exploration'] = args.exploration
 
     def session_report(status):
         if directory is not None:
             import os
-            write_json(directory / 'report.json', dict(schema_version='crt-agent-z-run-v1',
+            write_json(directory / 'report.json', dict(schema_version=f'crt-{family}-run-v1',
                        status=status, pid=os.getpid(), config=settings | {'environment': 'original', 'initial_population':
                                   str(args.initial_population) if args.initial_population is not None else None}))
 
     session_report('running')
     try:
-        result = run(**settings, candidate=candidate, progress=progress,
+        result = run(**settings, family=family, candidate=candidate, progress=progress,
                      directory=directory, resume=bool(args.resume))
     except KeyboardInterrupt:
         session_report('stopped')

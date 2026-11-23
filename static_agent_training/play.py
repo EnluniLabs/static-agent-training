@@ -159,7 +159,7 @@ def handler_for(bundle, *, status_root=ROOT):
                         kind, snapshot, path = workspace.models.load(arg('snapshot'))
                         if path is not None:
                             self.download(path)
-                        elif kind == 'agent-z':
+                        elif kind in ('agent-z','agent-q'):
                             from .serialization import dumps
                             self.send(200, dumps(snapshot))
                         else:

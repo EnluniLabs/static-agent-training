@@ -29,9 +29,9 @@ def validate_inputs(paths, environment, boundary_mode="clamp"):
         path = Path(path).resolve()
         data = read_population(path)
         source = data['config']
-        if data['schema_version'] == 'crt-agent-z-population-v1':
+        if data['schema_version'] in ('crt-agent-z-population-v1','crt-agent-q-population-v1'):
             if environment != 'original' or boundary_mode != 'clamp':
-                raise ValueError('Agent Z assessments require Original [−20, 20] with clamped walls')
+                raise ValueError('Agent Z and Q assessments require Original [−20, 20] with clamped walls')
             sources.append((path, data, TrainingConfig(varying_goals=True)))
             continue
         config = TrainingConfig(model=source.get('model','categorical'),**sensory_apparatus(source),
@@ -88,26 +88,30 @@ def run_assessment(paths, output, *, environment='original', episodes=200, seed=
             # Evaluate a retained copy, so the exact bytes used remain available.
             payload=path.read_bytes();snapshot.write_bytes(payload)
             data=read_population(snapshot)
-            if data['schema_version'] != 'crt-agent-z-population-v1':
+            if data['schema_version'] not in ('crt-agent-z-population-v1','crt-agent-q-population-v1'):
                 validate_compatibility(data,cfg)
             digest=hashlib.sha256(payload).hexdigest()
             frozen.append((path,snapshot,data,cfg,digest))
         report['progress']['total_animals']=sum(len(data['members']) for _,_,data,_,_ in frozen)
         for path,snapshot,data,cfg,digest in frozen:
-            if data['schema_version'] == 'crt-agent-z-population-v1':
+            if data['schema_version'] in ('crt-agent-z-population-v1','crt-agent-q-population-v1'):
                 from .experimental.agent_z import AgentZ
                 from .experimental.agent_z_kernels import NativeKernels
                 from .serialization import dumps
-                kernels = NativeKernels()
+                from .experimental.agent_q import AgentQ
+                from .experimental.agent_q_accelerated import NativeQ
+                q = data['schema_version']=='crt-agent-q-population-v1'
+                kernels, cls = (NativeQ(),AgentQ) if q else (NativeKernels(),AgentZ)
                 population = dict(name=data['name'], source=str(path), snapshot=str(snapshot),
-                                  sha256=digest, model='agent-z', count=len(data['members']),
+                                  sha256=digest, model='agent-q' if q else 'agent-z', count=len(data['members']),
                                   completed=0, individuals=[])
                 report['populations'].append(population)
                 for i, member in enumerate(data['members']):
-                    agent = AgentZ.from_data(member['individual'], kernels=kernels)
-                    result = kernels.evaluate(agent, tasks,
-                        random.Random(derive(seed, 'frozen-population-animal', i)),
-                        round_limit=64, empirical_rate=0, structural_rate=0, metrics=True)
+                    agent = cls.from_data(member['individual'], kernels=kernels)
+                    eval_seed = derive(seed, 'frozen-population-animal', i)
+                    result = (kernels.evaluate(agent,tasks,seed=eval_seed,learning='off') if q else
+                              kernels.evaluate(agent,tasks,random.Random(eval_seed),round_limit=64,
+                                               empirical_rate=0,structural_rate=0,metrics=True))
                     identity = hashlib.sha256(dumps(member['individual'], sort_keys=True).encode()).hexdigest()
                     population['individuals'].append(dict(index=i, genotype_id=identity,
                         source_generation=member['generation'], assessment=dict(
@@ -123,7 +127,7 @@ def run_assessment(paths, output, *, environment='original', episodes=200, seed=
                     save()
                 if hashlib.sha256(snapshot.read_bytes()).hexdigest() != digest:
                     raise AssertionError('Assessment input snapshot changed')
-                print(f"{population['name']}: {population['completed']} frozen Agent Z candidates; "
+                print(f"{population['name']}: {population['completed']} frozen {population['model']} candidates; "
                       f"mean success {population['mean_success']:.2%}", flush=True)
                 continue
             members=[Species.from_data(row['individual']) for row in data['members']]

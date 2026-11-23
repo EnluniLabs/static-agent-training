@@ -41,9 +41,9 @@ class WorkspaceModels:
         self.lifetime_lock = threading.RLock()
 
     def snapshots(self, relative, model):
-        if model == 'agent-z':
+        if model in ('agent-z','agent-q'):
             from .workspace_agent_z import snapshots
-            return snapshots(self.sessions.path(relative), self.root)
+            return snapshots(self.sessions.path(relative), self.root,model)
         if model not in ('baseline', 'senses'):
             raise ValueError('Choose baseline or fixed senses')
         directory = self.sessions.path(relative)
@@ -109,7 +109,7 @@ class WorkspaceModels:
     def load(self, identifier):
         if not isinstance(identifier, str):
             raise ValueError('Choose a saved model snapshot')
-        if identifier.startswith('z-snapshot:'):
+        if identifier.startswith(('z-snapshot:','q-snapshot:')):
             from .workspace_agent_z import load
             return load(identifier, self.root)
         if identifier.startswith('candidate:'):
@@ -153,7 +153,7 @@ class WorkspaceModels:
         identifier = data.get('snapshot')
         key = self.lifetime_key(data)
         with self.lifetime_lock:
-            if isinstance(identifier, str) and identifier.startswith('z-snapshot:'):
+            if isinstance(identifier, str) and identifier.startswith(('z-snapshot:','q-snapshot:')):
                 from .workspace_agent_z import build, graph
                 session = self.lifetimes.get(key)
                 if session and session['snapshot'] == identifier:
@@ -345,16 +345,19 @@ class WorkspaceModels:
                           structural_corrections=counts['CONFLICT'], total_empirical_updates=session['empirical_updates'],
                           total_structural_corrections=session['conflicts']))
 
-    def z_attempt(self, data, snapshot):
+    def z_attempt(self, data, snapshot, family='agent-z'):
         from .workspace_agent_z import attempt, build
 
         policy = data.get('policy', 'animal')
         start, goal, seed = (data[k] for k in ('start', 'goal', 'seed'))
         if data.get('world', 'original') != 'original' or not all(-20 <= x <= 20 for x in (start, goal)):
-            raise ValueError('Agent Z uses the −20 to 20 number line')
+            raise ValueError(f'{family} uses the −20 to 20 number line')
         if policy not in ('animal', 'random'):
             raise ValueError('Unknown policy')
-        learn = data.get('learning', False) and policy == 'animal'
+        mode = data.get('learning_mode','both') if family=='agent-q' else 'both'
+        if mode not in ('both','off','empirical','structural'):
+            raise ValueError('Unknown learning mode')
+        learn = data.get('learning', False) and policy == 'animal' and mode!='off'
         key = self.lifetime_key(data) if learn else data.get('lifetime_id')
         with self.lifetime_lock:
             session = self.lifetimes.get(key) if isinstance(key, str) and policy == 'animal' else None
@@ -380,12 +383,12 @@ class WorkspaceModels:
                                   reason='target' if position == goal else 'action_limit')
             else:
                 frames, empirical, structural = attempt(
-                    session['model'] if session else build(snapshot), start, goal, seed, learn)
+                    session['model'] if session else build(snapshot), start, goal, seed, learn, mode)
             if session is not None:
                 session['attempts'] += 1
                 session['empirical_updates'] += empirical
                 session['conflicts'] += structural
-            return dict(start=start, goal=goal, seed=seed, policy=policy, model='agent-z', frames=frames,
+            return dict(start=start, goal=goal, seed=seed, policy=policy, model=family, frames=frames,
                         lower=-20, upper=20, environment='original', boundary_mode='clamp',
                         action_policy='external signal interpretation',
                         sensory_interface='universal-byte', sensory_partitions=snapshot['regions'],
@@ -402,8 +405,8 @@ class WorkspaceModels:
         if type(data.get('learning', False)) is not bool:
             raise ValueError('Learning must be a boolean')
         kind, snapshot, _ = self.load(data.get('snapshot'))
-        if kind == 'agent-z':
-            return self.z_attempt(data, snapshot)
+        if kind in ('agent-z','agent-q'):
+            return self.z_attempt(data, snapshot,kind)
         saved_environment = snapshot.get('playback_world',snapshot).get('environment','original')
         world_name = data.get('world', saved_environment)
         policy = data.get('policy', 'animal')

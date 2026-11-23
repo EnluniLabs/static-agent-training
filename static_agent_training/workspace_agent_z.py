@@ -3,7 +3,9 @@ from functools import lru_cache
 from pathlib import Path
 import random
 
-from .experimental.agent_z import AgentZ
+from .experimental.agent_z import AgentZ, Chain
+from .experimental.agent_q import AgentQ, MODES
+from .experimental.agent_q_accelerated import NativeQ
 from .experimental.agent_z_experiment import read_z_artifact
 from .experimental.agent_z_kernels import NativeKernels, sigmoid
 
@@ -21,7 +23,13 @@ def legacy_result(directory):
     return data if data.get('champion', {}).get('schema_version') == AgentZ.schema else {}
 
 
-def snapshots(directory, root):
+def snapshots(directory, root, family='agent-z'):
+    from .catalog import read_json
+    report=read_json(directory/'report.json')
+    recorded=report.get('schema_version')
+    if (recorded in ('crt-agent-z-run-v1','crt-agent-q-run-v1') and
+            recorded != f'crt-{family}-run-v1') or (family=='agent-q' and recorded!='crt-agent-q-run-v1'):
+        return []
     paths = sorted((directory / 'snapshots').glob('*.json.gz'), reverse=True)
     options = []
     if not paths and (data := legacy_result(directory)):
@@ -36,8 +44,8 @@ def snapshots(directory, root):
             settings = read_json(directory / 'report.json').get('config', {})
             generation = int(path.name.split('.')[0])
             row = read_json(directory / 'summaries' / f'{generation:05d}.json')
-        options.append(dict(id='z-snapshot:' + path.relative_to(root / 'runs').as_posix(),
-                            model='agent-z', label=f'Generation {generation} · training champion',
+        options.append(dict(id=family[-1]+'-snapshot:' + path.relative_to(root / 'runs').as_posix(),
+                            model=family, label=f'Generation {generation} · training champion',
                             stage='trained', sensory_interface='universal-byte',
                             sensory_partitions=settings.get('regions', 2), environment='original',
                             boundary_mode='clamp', varying_goals=True,
@@ -47,7 +55,9 @@ def snapshots(directory, root):
 
 def load(identifier, root):
     runs = (root / 'runs').resolve()
-    path = (runs / identifier.removeprefix('z-snapshot:')).resolve()
+    prefix, relative = identifier.split(':',1)
+    family, cls = ('agent-q',AgentQ) if prefix=='q-snapshot' else ('agent-z',AgentZ)
+    path = (runs / relative).resolve()
     if not path.is_relative_to(runs) or not path.is_file():
         raise ValueError('Unknown Agent Z snapshot')
     if path.name == 'result.json.gz':
@@ -56,49 +66,68 @@ def load(identifier, root):
         data = read_z_artifact(path)
     else:
         raise ValueError('Choose an Agent Z snapshot')
-    if not isinstance(data, dict) or data.get('schema_version') != AgentZ.schema:
+    if not isinstance(data, dict) or data.get('schema_version') != cls.schema:
         raise ValueError('Unsupported Agent Z snapshot')
-    return 'agent-z', data, None
+    return family, data, None
 
 
 def graph(model):
     nodes, edges = [], []
-    for bit in range(model.width):
+    q = isinstance(model,AgentQ)
+    for bit in range(8 if q else model.width):
         nodes.extend([dict(id=f'input:{bit}', label=f'Input bit {bit}', kind='input',
-                           region=bit % model.regions),
-                      dict(id=f'output:{bit}', label=f'Output bit {bit}', kind='output')])
+                           region=bit % model.regions)])
+        if not q:
+            nodes.append(dict(id=f'output:{bit}', label=f'Output bit {bit}', kind='output'))
         inputs = sorted(range(len(model.ids)), key=lambda i: -abs(model.embedding[i][bit + 1]))[:4]
         for i in inputs:
             edges.append(dict(source=f'input:{bit}', target=model.ids[i], kind='embedding',
                               value=model.embedding[i][bit + 1], measure='weight'))
+    if q:
+        nodes.extend(dict(id=f'output:{i}',label=f'Physical action {signal.hex()}',kind='output')
+                     for i,signal in enumerate(model.actions))
     for i, pair in enumerate(model.ids):
         nodes.append(dict(id=pair, label=f'State {i + 1}', kind='state',
                           pair_id=pair, bias=model.embedding[i][0]))
-        for bit, value in enumerate(model.continuation[i]):
+        outputs = (model.policy(Chain(0,pair)) if pair in model.structure.successors else []) if q else [
+            sigmoid(value) for value in model.continuation[i]]
+        for bit,value in enumerate(outputs):
             edges.append(dict(source=pair, target=f'output:{bit}', kind='output',
-                              value=sigmoid(value), measure='probability'))
+                              value=value, measure='probability'))
     for pair, target in model.structure.successors.items():
         edges.append(dict(source=pair, target=target, value=1, kind='successor', measure='structural'))
     return dict(nodes=nodes, edges=edges, connection_limit=8,
-                sensory_partitions=model.regions, action_policy='external signal interpretation')
+                sensory_partitions=model.regions, action_policy='derived policy · region 0' if q else 'external signal interpretation')
 
 
-def attempt(model, start, goal, seed, learning):
-    result = model.kernels.evaluate(model, [(start, goal)], random.Random(seed), round_limit=64,
-                                    empirical_rate=.05 if learning else 0,
-                                    structural_rate=.05 if learning else 0,
-                                    playback=True, return_weights=learning)
+def attempt(model, start, goal, seed, learning, mode='both'):
+    q = isinstance(model,AgentQ)
+    if q:
+        result = model.kernels.evaluate(model,[(start,goal)],seed=seed,
+                                        learning=mode if learning else 'off',trace=True,return_weights=learning)
+    else:
+        result = model.kernels.evaluate(model, [(start, goal)], random.Random(seed), round_limit=64,
+                                        empirical_rate=.05 if learning else 0,
+                                        structural_rate=.05 if learning else 0,
+                                        playback=True, return_weights=learning)
     if learning:
         model.embedding = result['embedding']
-        model.continuation = result['continuation']
+        if q:
+            model.expectations = result['expectations']
+        else:
+            model.continuation = result['continuation']
     frames = [dict(position=start, actions=0, label='Initial observation', done=False,
                    tested=0, correct=0)]
     empirical = structural = 0
     for events, world in zip(result['trace'], result['world_frames']):
         measured = [event for event in events if event['observation'] is not None]
-        empirical += len(measured) if learning else 0
-        structural += sum(e['compatibility'] is not None and e['compatibility'] < .1
-                          for e in measured) if learning else 0
+        if q and learning:
+            empirical += len(measured) if MODES[mode][0] else 0
+            structural += len(measured) if MODES[mode][1] else 0
+        elif learning:
+            empirical += len(measured)
+            structural += sum(e['compatibility'] is not None and e['compatibility'] < .1
+                              for e in measured)
         frames.append(dict(world, label=f'Round {len(frames)} · ' +
                            ', '.join(e['signal'] for e in events), emissions=events,
                            active_pairs=[e['chain'] for e in events],
@@ -114,6 +143,8 @@ def attempt(model, start, goal, seed, learning):
 
 
 def build(snapshot):
+    if snapshot.get('schema_version') == AgentQ.schema:
+        return AgentQ.from_data(snapshot,kernels=NativeQ())
     return AgentZ.from_data(snapshot, kernels=NativeKernels())
 
 
