@@ -16,6 +16,7 @@ from .agent_z import Chain
 class Diagnostics(c.Structure):
     _fields_ = [
         ('action_counts', c.c_uint64 * 9), ('starts', c.c_uint64 * 41), ('solved', c.c_uint64 * 41),
+        ('pair_starts', c.c_uint64 * (41 * 41)), ('pair_solved', c.c_uint64 * (41 * 41)),
         ('ends', c.c_uint64 * 4), ('compatibility_bins', c.c_uint64 * 20),
         ('unique_first', c.c_uint64), ('tied_first', c.c_uint64), ('action_sign', c.c_uint64 * 3),
         ('compatibility_sum', c.c_double), ('action_entropy_sum', c.c_double),
@@ -48,7 +49,7 @@ def _kernel():
     call = c.CDLL(str(library)).w_evaluate
     integer = c.POINTER(c.c_int)
     decimal = c.POINTER(c.c_double)
-    call.argtypes = ([c.c_int] * 6 + [integer] * 3 + [c.POINTER(c.c_uint32)] +
+    call.argtypes = ([c.c_int] * 7 + [integer] * 3 + [c.POINTER(c.c_uint32)] +
                      [decimal] * 2 + [c.c_double] * 2 + [integer, c.POINTER(Trace), c.POINTER(c.c_uint32),
                      c.POINTER(Diagnostics), c.POINTER(c.c_uint8), c.POINTER(c.c_uint8)])
     call.restype = c.c_int
@@ -57,16 +58,18 @@ def _kernel():
 
 def evaluate(agent, tasks, *, seed=7, action_rate=.05, structural_rate=.05,
              round_limit=64, encoding_seed=0, action_limit=12, trace=False, environment='original',
-             rng_state=None, return_rng=False, diagnostics=False):
+             rng_state=None, return_rng=False, diagnostics=False, task_diagnostics=False):
     """Run a native lifetime on a copy of inherited parameters."""
     if any(not math.isfinite(rate) or rate < 0 for rate in (action_rate, structural_rate)):
         raise ValueError('learning rates must be finite and nonnegative')
     if type(round_limit) is not int or type(action_limit) is not int or min(round_limit, action_limit) < 1:
         raise ValueError('round and action limits must be positive integers')
     tasks = tuple(tuple(task) for task in tasks)
-    if environment not in ('original', 'shifted', 'lights-out-2x2'):
+    if environment not in ('original', 'shifted', 'remapped-number-line', 'lights-out-2x2'):
         raise ValueError('unsupported Agent W/D assessment environment')
     puzzle = environment == 'lights-out-2x2'
+    sensor_rotate = 2 if environment == 'remapped-number-line' else 0
+    diagnostics = diagnostics or task_diagnostics
     lower, upper = (0, 15) if puzzle else (30, 70) if environment == 'shifted' else (-20, 20)
     if any(len(task) != 2 or any(type(v) is not int or not lower <= v <= upper for v in task)
            or (puzzle and task[1] != 0) for task in tasks):
@@ -105,7 +108,7 @@ def evaluate(agent, tasks, *, seed=7, action_rate=.05, structural_rate=.05,
     counts = Diagnostics() if diagnostics else None
     changed_actions = (c.c_uint8 * pairs)() if diagnostics else None
     changed_embedding = (c.c_uint8 * pairs)() if diagnostics else None
-    if _kernel()(pairs, agent.regions, episodes, round_limit, action_limit, int(puzzle), successor, inputs, moves,
+    if _kernel()(pairs, agent.regions, episodes, round_limit, action_limit, int(puzzle), sensor_rotate, successor, inputs, moves,
                  state, embedding, continuation, action_rate, structural_rate, stats, records,
                  final_state, c.byref(counts) if counts is not None else None,
                  changed_actions, changed_embedding):
@@ -131,6 +134,10 @@ def evaluate(agent, tasks, *, seed=7, action_rate=.05, structural_rate=.05,
             termination=dict(zip(('goal', 'action_limit', 'chains_ended', 'round_limit'), counts.ends)),
             action_updated_states=[i for i, value in enumerate(changed_actions) if value],
             embedding_updated_states=[i for i, value in enumerate(changed_embedding) if value])
+        if task_diagnostics:
+            result['diagnostics']['task_outcomes'] = {
+                f'{i // 41 + lower},{i % 41 + lower}': [total, counts.pair_solved[i]]
+                for i, total in enumerate(counts.pair_starts) if total}
     if trace:
         result['trace'] = []
         for i in range(actions):

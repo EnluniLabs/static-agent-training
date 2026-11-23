@@ -2,6 +2,10 @@
 #include "evaluate_agent_z.cpp"
 
 namespace {
+int w_sensor(int byte, int rotate) {
+    return ((byte << rotate) | (byte >> (width - rotate))) & 255;
+}
+
 void w_distribution(const double* logits, std::array<double, action_count>& p) {
     const double peak = *std::max_element(logits, logits + action_count);
     double total = 0;
@@ -31,6 +35,8 @@ struct WDiagnostics {
     std::uint64_t action_counts[action_count];
     std::uint64_t starts[41];
     std::uint64_t solved[41];
+    std::uint64_t pair_starts[41 * 41];
+    std::uint64_t pair_solved[41 * 41];
     std::uint64_t ends[4]; // goal, action limit, exhausted chains, round limit
     std::uint64_t compatibility_bins[20];
     std::uint64_t unique_first;
@@ -53,7 +59,7 @@ struct WTrace {
     double entropy;
 };
 
-int w_evaluate(int pairs, int regions, int episodes, int round_limit, int action_limit, int puzzle,
+int w_evaluate(int pairs, int regions, int episodes, int round_limit, int action_limit, int puzzle, int sensor_rotate,
                const int* successors, const int* tasks, const int* moves,
                const std::uint32_t* state, double* embedding, double* continuation,
                double action_rate, double structural_rate, int* stats, WTrace* trace,
@@ -70,7 +76,7 @@ int w_evaluate(int pairs, int regions, int episodes, int round_limit, int action
             const int goal = tasks[2 * episode + 1];
             int remaining = action_limit;
             std::array<int, maximum_regions> active;
-            const auto initial = signal_bits(puzzle ? position : ((goal - position) & 255));
+            const auto initial = signal_bits(w_sensor(puzzle ? position : ((goal - position) & 255), sensor_rotate));
             for (int region = 0; region < regions; ++region) {
                 z_embedding(pairs, width, region, regions, embedding, initial.data(), embedded.data());
                 active[region] = w_sample(embedded.begin(), embedded.end(), rng);
@@ -90,7 +96,7 @@ int w_evaluate(int pairs, int regions, int episodes, int round_limit, int action
                     const int action = w_sample(distribution.begin(), distribution.end(), rng);
                     position = puzzle ? position ^ moves[action] : std::clamp(position + moves[action], -20, 20);
                     --remaining;
-                    const int feedback = puzzle ? position : ((goal - position) & 255);
+                    const int feedback = w_sensor(puzzle ? position : ((goal - position) & 255), sensor_rotate);
                     const int successor = successors[pair];
                     active[region] = successor;
                     double compatibility = -1;
@@ -164,6 +170,9 @@ int w_evaluate(int pairs, int regions, int episodes, int round_limit, int action
                 const int start = tasks[2 * episode] + (puzzle ? 0 : 20);
                 ++diagnostics->starts[start];
                 diagnostics->solved[start] += position == goal;
+                const int task = start * 41 + goal + (puzzle ? 0 : 20);
+                ++diagnostics->pair_starts[task];
+                diagnostics->pair_solved[task] += position == goal;
                 const bool chain_exhausted = std::all_of(active.begin(), active.begin() + regions,
                                                          [](int pair) { return pair < 0; });
                 const int reason = position == goal ? 0 : !remaining ? 1 :

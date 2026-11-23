@@ -165,3 +165,26 @@ class AgentWTests(unittest.TestCase):
         second = intermediate.evaluate(tasks[19:], rng_state=first['rng_state'], **options)
         for key in ('embedding','continuation','rng_state'):
             self.assertEqual(plain[key], second[key])
+
+
+    def test_remapped_native_sensor_and_per_task_counts(self):
+        from static_agent_training.experimental.wd_structural_shielding import remap, verify_remap
+
+        verify_remap(self.agent)
+        tasks = [(-2, 1), (-2, 3), (1, 1), (-2, 3)]
+        result = self.agent.evaluate(tasks, environment='remapped-number-line',
+                                     action_rate=0, structural_rate=0, task_diagnostics=True)
+        outcomes = result['diagnostics']['task_outcomes']
+        self.assertEqual({key: value[0] for key, value in outcomes.items()},
+                         {'-2,1':1, '-2,3':2, '1,1':1})
+        self.assertEqual(sum(x[1] for x in outcomes.values()), result['successes'])
+        self.assertEqual(remap(1), 4)
+
+    def test_shape_distinguishes_rewiring_from_relabeling(self):
+        from static_agent_training.experimental.wd_structural_shielding import shape
+
+        nodes = ('a', 'b', 'c')
+        self.assertEqual(shape(nodes, {'a':'a', 'b':'c', 'c':'b'}),
+                         shape(nodes, {'b':'b', 'a':'c', 'c':'a'}))
+        self.assertNotEqual(shape(nodes, {'a':'a', 'b':'c', 'c':'b'}),
+                            shape(nodes, {'a':'b', 'b':'c', 'c':'a'}))
