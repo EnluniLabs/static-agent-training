@@ -22,7 +22,7 @@ class WorkspaceStorage:
             try:
                 args = (proc/'cmdline').read_bytes().decode().split('\0')
                 if not any(a.startswith('static_agent_training.') for a in args):continue
-                for flag in ('--output','--resume'):
+                for flag in ('--output','--resume','--workspace-directory'):
                     if flag in args:
                         raw=Path(args[args.index(flag)+1])
                         paths.add((raw if raw.is_absolute() else (proc/'cwd').resolve()/raw).resolve())

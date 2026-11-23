@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from static_agent_training import engine, serialization
 from static_agent_training.experimental.agent_z import AgentZ, Chain, Structure
 from static_agent_training.experimental.agent_z_environment import NumberLine
-from static_agent_training.experimental.agent_z_experiment import run
+from static_agent_training.experimental.agent_z_experiment import evaluate, run
 from static_agent_training.experimental.agent_z_kernels import NativeKernels
 from static_agent_training.initialize import I, K, pair_id, canonical_bytes
 
@@ -114,9 +114,58 @@ class AgentZTests(unittest.TestCase):
             self.assertEqual(agent.embedding != original['embedding'], bool(structural))
             self.assertEqual(agent.continuation != original['continuation'], bool(empirical))
 
+    def test_entire_native_lifetime_matches_reference(self):
+        from unittest.mock import patch
+
+        structure, _ = Structure.develop([(I, I)])
+        tasks = [(0, 1), (-20, 20), (20, -20)] * 5
+        python = AgentZ(structure, [[0.] * 9], [[0.] * 8], regions=8)
+        native = AgentZ.from_data(python.to_data(), kernels=NativeKernels())
+        options = dict(seed=77, trace=True, return_weights=True, round_limit=24)
+        for mode in ('both', 'empirical', 'structural', 'off'):
+            reference = evaluate(python, tasks, learning=mode, **options)
+            with (patch.object(AgentZ, 'step', side_effect=AssertionError('Python round')),
+                 patch.object(AgentZ, 'activate', side_effect=AssertionError('Python activation')),
+                 patch.object(NumberLine, 'interpret', side_effect=AssertionError('Python adapter'))):
+                result = evaluate(native, tasks, learning=mode, **options)
+            self.assertEqual(result, reference)
+        observed = [event for events in reference['trace'] for event in events]
+        self.assertTrue(any(event['observation'] is None for event in observed))
+        self.assertTrue(any(event['observation'] is not None for event in observed))
+
+    def test_entire_native_lifetime_matches_structural_updates_and_terminal_chains(self):
+        import random
+        from static_agent_training.initialize import Config, generate_term
+
+        rng = random.Random(7)
+        seeds = [(generate_term(rng, Config()), generate_term(rng, Config())) for _ in range(8)]
+        structure, _ = Structure.develop(seeds, budget=64)
+        count = len(structure.pairs)
+        self.assertGreater(count, 10)
+        python = AgentZ(structure, [[0.] * 9 for _ in range(count)],
+                        [[0.] * 8 for _ in range(count)], regions=4)
+        native = AgentZ.from_data(python.to_data(), kernels=NativeKernels())
+        options = dict(seed='structural run', trace=True, return_weights=True)
+        tasks = [(0, 1), (20, -20), (0, 0)] * 8
+        reference = evaluate(python, tasks, **options)
+        result = evaluate(native, tasks, **options)
+        self.assertNotEqual(reference['embedding'], python.embedding)
+        self.assertNotEqual(reference['continuation'], python.continuation)
+        self.assertEqual(native.to_data(), python.to_data())
+        for family in ('embedding', 'continuation'):
+            for actual, expected in zip(result.pop(family), reference.pop(family)):
+                for a, b in zip(actual, expected):
+                    self.assertAlmostEqual(a, b, places=14)
+        for expected_round, actual_round in zip(reference['trace'], result['trace']):
+            for expected, actual in zip(expected_round, actual_round):
+                if expected['compatibility'] is not None:
+                    self.assertAlmostEqual(actual['compatibility'], expected['compatibility'], places=14)
+                    actual['compatibility'] = expected['compatibility']
+        self.assertEqual(result, reference)
+
     def test_seeded_evolution_backend_parity(self):
         options = dict(seed=11, generations=2, episodes=8, population=4)
-        reference = run(**options)
+        reference = run(backend='python', **options)
         native = run(backend='native', **options)
         self.assertEqual(reference['history'], native['history'])
         self.assertEqual(reference['champion'], native['champion'])

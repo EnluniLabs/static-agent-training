@@ -23,6 +23,7 @@ Inspect and organize (no experiments launched):
   help                      Show this command map
 
 Run tools (only when explicitly invoked):
+  agent-d [options]         Run Agent D evolution
   agent-z [options]         Run or assess Agent Z
   train [--model senses]     Evolutionary training for either model
   resume [RUN] [options]     Resume evolutionary training
@@ -90,8 +91,8 @@ def main(root, argv=None):
         return
     command, args = args[0], args[1:]
     try:
-        if command == 'agent-z':
-            execute('static_agent_training.experimental.agent_z_experiment', args)
+        if command in ('agent-d', 'agent-z'):
+            execute('static_agent_training.experimental.' + command.replace('-', '_') + '_experiment', args)
             return
         if command == 'runs':
             parser = argparse.ArgumentParser(prog='./project runs')

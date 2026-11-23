@@ -1,6 +1,8 @@
 """Agent Z: fixed lambda successors with universal binary continuations."""
 from collections import defaultdict
 from dataclasses import dataclass
+from functools import cached_property
+import hashlib
 import math
 from types import MappingProxyType
 
@@ -27,6 +29,19 @@ class Structure:
                 raise ValueError('invalid function-first successor')
         object.__setattr__(self, 'pairs', MappingProxyType(dict(sorted(pairs.items()))))
         object.__setattr__(self, 'successors', MappingProxyType(successors))
+
+    @cached_property
+    def fingerprint(self):
+        from ..speciation import Structure as Descriptor
+
+        digest = hashlib.sha256(b'crt-agent-z-structure-v1')
+        for pair in self.pairs:
+            digest.update(b'p' + bytes.fromhex(pair))
+        for source, target in sorted(self.successors.items()):
+            digest.update(b'e' + bytes.fromhex(source) + bytes.fromhex(target))
+        descriptor = Descriptor(frozenset(), frozenset(self.pairs),
+                                frozenset(self.successors.items()))
+        return digest.digest(), descriptor
 
     @classmethod
     def develop(cls, seeds, *, budget=32, seed=0, max_nodes=256, max_transitions=32):

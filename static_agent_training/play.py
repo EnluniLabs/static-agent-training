@@ -159,6 +159,9 @@ def handler_for(bundle, *, status_root=ROOT):
                         kind, snapshot, path = workspace.models.load(arg('snapshot'))
                         if path is not None:
                             self.download(path)
+                        elif kind == 'agent-z':
+                            from .serialization import dumps
+                            self.send(200, dumps(snapshot))
                         else:
                             self.send(200, json.dumps(snapshot))
                     elif parsed.path == '/api/log':

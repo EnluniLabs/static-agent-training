@@ -20,7 +20,7 @@ from .populations import read_population, validate_compatibility, sensory_appara
 from .seeds import derive
 
 
-def validate_inputs(paths, environment):
+def validate_inputs(paths, environment, boundary_mode="clamp"):
     spec = environment_spec(environment)
     if not paths:
         raise ValueError('Select at least one saved population')
@@ -29,6 +29,11 @@ def validate_inputs(paths, environment):
         path = Path(path).resolve()
         data = read_population(path)
         source = data['config']
+        if data['schema_version'] == 'crt-agent-z-population-v1':
+            if environment != 'original' or boundary_mode != 'clamp':
+                raise ValueError('Agent Z assessments require Original [−20, 20] with clamped walls')
+            sources.append((path, data, TrainingConfig(varying_goals=True)))
+            continue
         config = TrainingConfig(model=source.get('model','categorical'),**sensory_apparatus(source),
             environment=environment,embedding_selection=source.get('embedding_selection','sample'),
             action_policy=source.get('action_policy','agreement'),encoding_seed=source.get('encoding_seed',0),
@@ -49,7 +54,7 @@ def run_assessment(paths, output, *, environment='original', episodes=200, seed=
         raise ValueError('invalid assessment seed or worker count')
     if boundary_mode not in ('clamp','terminate'):
         raise ValueError('boundary mode must be clamp or terminate')
-    spec,sources=validate_inputs(paths,environment)
+    spec,sources=validate_inputs(paths,environment,boundary_mode)
     output=Path(output).resolve()
     if output.exists() and any(output.iterdir()):
         raise ValueError('Choose a new assessment output directory')
@@ -83,11 +88,44 @@ def run_assessment(paths, output, *, environment='original', episodes=200, seed=
             # Evaluate a retained copy, so the exact bytes used remain available.
             payload=path.read_bytes();snapshot.write_bytes(payload)
             data=read_population(snapshot)
-            validate_compatibility(data,cfg)
+            if data['schema_version'] != 'crt-agent-z-population-v1':
+                validate_compatibility(data,cfg)
             digest=hashlib.sha256(payload).hexdigest()
             frozen.append((path,snapshot,data,cfg,digest))
         report['progress']['total_animals']=sum(len(data['members']) for _,_,data,_,_ in frozen)
         for path,snapshot,data,cfg,digest in frozen:
+            if data['schema_version'] == 'crt-agent-z-population-v1':
+                from .experimental.agent_z import AgentZ
+                from .experimental.agent_z_kernels import NativeKernels
+                from .serialization import dumps
+                kernels = NativeKernels()
+                population = dict(name=data['name'], source=str(path), snapshot=str(snapshot),
+                                  sha256=digest, model='agent-z', count=len(data['members']),
+                                  completed=0, individuals=[])
+                report['populations'].append(population)
+                for i, member in enumerate(data['members']):
+                    agent = AgentZ.from_data(member['individual'], kernels=kernels)
+                    result = kernels.evaluate(agent, tasks,
+                        random.Random(derive(seed, 'frozen-population-animal', i)),
+                        round_limit=64, empirical_rate=0, structural_rate=0, metrics=True)
+                    identity = hashlib.sha256(dumps(member['individual'], sort_keys=True).encode()).hexdigest()
+                    population['individuals'].append(dict(index=i, genotype_id=identity,
+                        source_generation=member['generation'], assessment=dict(
+                            fitness=result['successes'] / episodes, rounds=result['rounds'],
+                            actions=result['actions'], tested=result['tested'],
+                            prediction_accuracy=result['correct'] / result['tested'] if result['tested'] else None,
+                            empirical_updates=0, conflicts=0)))
+                    population['completed'] += 1
+                    scores = [row['assessment']['fitness'] for row in population['individuals']]
+                    population.update(mean_success=statistics.mean(scores),
+                                      best_success=max(scores), worst_success=min(scores))
+                    report['progress']['completed_animals'] += 1
+                    save()
+                if hashlib.sha256(snapshot.read_bytes()).hexdigest() != digest:
+                    raise AssertionError('Assessment input snapshot changed')
+                print(f"{population['name']}: {population['completed']} frozen Agent Z candidates; "
+                      f"mean success {population['mean_success']:.2%}", flush=True)
+                continue
             members=[Species.from_data(row['individual']) for row in data['members']]
             population=dict(name=data['name'],source=str(path),snapshot=str(snapshot),sha256=digest,
                 model=cfg.model,embedding_selection=cfg.embedding_selection if cfg.model=="senses" else None,count=len(members),completed=0,individuals=[],

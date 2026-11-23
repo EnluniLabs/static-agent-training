@@ -32,10 +32,16 @@ def read_population(path):
     path = Path(path)
     with gzip.open(path, 'rt') if path.suffix == '.gz' else path.open() as handle:
         value = json.load(handle)
-    if value.get('schema_version') != 'crt-population-v1' or not value.get('members'):
+    schema = value.get('schema_version')
+    if schema not in ('crt-population-v1', 'crt-agent-z-population-v1') or not value.get('members'):
         raise ValueError('Choose a nonempty saved top-performer population')
-    for row in value['members']:
-        Species.from_data(row['individual'])
+    if schema == 'crt-agent-z-population-v1':
+        from .experimental.agent_z import AgentZ
+        for row in value['members']:
+            AgentZ.from_data(row['individual'])
+    else:
+        for row in value['members']:
+            Species.from_data(row['individual'])
     return value
 
 
@@ -113,7 +119,9 @@ def _population_summary(filename, device, inode, modified, changed, size):
         receptors=config.get('receptors',256),sensory_interface=config.get('sensory_interface','legacy-bytes'),
         retina_width=config.get('retina_width',16),retina_height=config.get('retina_height',16),
         sensory_partitions=config.get('sensory_partitions',1),action_policy=config.get('action_policy','agreement'),
-        environment=config.get('environment','original'),source_type=data['source_type'])
+        environment=config.get('environment','original'),source_type=data['source_type'],
+        **({'can_seed': all('seeds' in member and 'budgets' in member for member in data['members'])}
+           if config.get('model') == 'agent-z' else {}))
 
 
 def list_populations(root):

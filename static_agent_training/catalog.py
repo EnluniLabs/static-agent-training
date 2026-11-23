@@ -22,8 +22,8 @@ def sensory_state(directory, metadata, module='static_agent_training.experimenta
         pid = metadata['pid']
         args = Path(f'/proc/{pid}/cmdline').read_bytes().decode().split('\0')
         if module in args:
-            flags = [args[i + 1] for i, flag in enumerate(args[:-1]) if flag in ('--output', '--resume')]
-            flags += [arg.split('=', 1)[1] for arg in args if arg.startswith(('--output=', '--resume='))]
+            flags = [args[i + 1] for i, flag in enumerate(args[:-1]) if flag in ('--output', '--resume', '--workspace-directory')]
+            flags += [arg.split('=', 1)[1] for arg in args if arg.startswith(('--output=', '--resume=', '--workspace-directory='))]
             cwd = Path(f'/proc/{pid}/cwd').resolve()
             if any((cwd / value).resolve() == directory.resolve() for value in flags):
                 return 'running'
@@ -60,7 +60,13 @@ def catalog(root, *, processes=None):
         report = read_json(path)
         schema = report.get('schema_version', '')
         progress = None
-        if schema == 'crt-frozen-assessment-v1':
+        if schema == 'crt-agent-z-run-v1':
+            kind = 'agent-z-training'
+            state = sensory_state(path.parent, report, module='static_agent_training.experimental.agent_z_experiment')
+            files = sorted((path.parent / 'summaries').glob('*.json'))
+            summary = read_json(files[-1]) if files else {}
+            progress = f"{summary.get('generation', 0)}/{report['config']['generations']}"
+        elif schema == 'crt-frozen-assessment-v1':
             kind='assessment'
             state=sensory_state(path.parent,report,module='static_agent_training.assessments')
             progress=f"{report.get('progress',{}).get('completed_animals',0)}/{report.get('progress',{}).get('total_animals',0)} candidates"
@@ -95,6 +101,17 @@ def catalog(root, *, processes=None):
             continue
         rows.append(dict(kind=kind, name=path.parent.name, path=str(path.parent.resolve()),
                          state=state, updated=path.stat().st_mtime, progress=progress, summary=summary))
+    from .workspace_agent_z import legacy_result
+    for directory in (root / 'runs').glob('agent-z-*'):
+        if (directory / 'report.json').is_file():
+            continue
+        result = legacy_result(directory)
+        if result:
+            path = directory / 'result.json.gz'
+            rows.append(dict(kind='agent-z-training', name=directory.name, path=str(directory.resolve()),
+                             state='completed', updated=path.stat().st_mtime,
+                             progress=f"{len(result['history'])}/{result['settings']['generations']}",
+                             summary=result['history'][-1]))
     return sorted(rows, key=lambda r: r['updated'], reverse=True)
 
 

@@ -41,6 +41,9 @@ class WorkspaceModels:
         self.lifetime_lock = threading.RLock()
 
     def snapshots(self, relative, model):
+        if model == 'agent-z':
+            from .workspace_agent_z import snapshots
+            return snapshots(self.sessions.path(relative), self.root)
         if model not in ('baseline', 'senses'):
             raise ValueError('Choose baseline or fixed senses')
         directory = self.sessions.path(relative)
@@ -106,6 +109,9 @@ class WorkspaceModels:
     def load(self, identifier):
         if not isinstance(identifier, str):
             raise ValueError('Choose a saved model snapshot')
+        if identifier.startswith('z-snapshot:'):
+            from .workspace_agent_z import load
+            return load(identifier, self.root)
         if identifier.startswith('candidate:'):
             bundle = self.candidates.load(identifier[len('candidate:'):])
             if bundle.get('model') == 'senses':
@@ -147,6 +153,13 @@ class WorkspaceModels:
         identifier = data.get('snapshot')
         key = self.lifetime_key(data)
         with self.lifetime_lock:
+            if isinstance(identifier, str) and identifier.startswith('z-snapshot:'):
+                from .workspace_agent_z import build, graph
+                session = self.lifetimes.get(key)
+                if session and session['snapshot'] == identifier:
+                    return dict(graph(session['model']), source='Current playground lifetime',
+                                attempts=session['attempts'])
+                return dict(graph(build(self.load(identifier)[1])), source='Saved snapshot', attempts=0)
             session = self.lifetimes.get(key)
             if session is not None and session['snapshot'] == identifier:
                 model = session['model']
@@ -199,6 +212,13 @@ class WorkspaceModels:
         key = self.lifetime_key(data)
         with self.lifetime_lock:
             session = self.lifetimes.get(key)
+            identifier = data.get('snapshot')
+            if isinstance(identifier, str) and identifier.startswith('z-snapshot:'):
+                from .workspace_agent_z import build, preview
+                active = session is not None and session['snapshot'] == identifier
+                model = session['model'] if active else build(self.load(identifier)[1])
+                return preview(model, payload, limit=limit, seed=seed, window_bytes=data.get('window_bytes'),
+                               origin='Current playground lifetime' if active else 'Saved snapshot')
             if session is not None and session['snapshot'] == data.get('snapshot'):
                 original = session['model']
                 if not isinstance(original, BitModel):
@@ -325,6 +345,56 @@ class WorkspaceModels:
                           structural_corrections=counts['CONFLICT'], total_empirical_updates=session['empirical_updates'],
                           total_structural_corrections=session['conflicts']))
 
+    def z_attempt(self, data, snapshot):
+        from .workspace_agent_z import attempt, build
+
+        policy = data.get('policy', 'animal')
+        start, goal, seed = (data[k] for k in ('start', 'goal', 'seed'))
+        if data.get('world', 'original') != 'original' or not all(-20 <= x <= 20 for x in (start, goal)):
+            raise ValueError('Agent Z uses the −20 to 20 number line')
+        if policy not in ('animal', 'random'):
+            raise ValueError('Unknown policy')
+        learn = data.get('learning', False) and policy == 'animal'
+        key = self.lifetime_key(data) if learn else data.get('lifetime_id')
+        with self.lifetime_lock:
+            session = self.lifetimes.get(key) if isinstance(key, str) and policy == 'animal' else None
+            if session and session['snapshot'] != data['snapshot']:
+                raise ValueError('Reset the playground lifetime before changing snapshots')
+            if session is None and learn:
+                if len(self.lifetimes) >= 64:
+                    raise ValueError('Too many playground lifetimes; reset unused lifetimes first')
+                session = dict(snapshot=data['snapshot'], model=build(snapshot), attempts=0,
+                               empirical_updates=0, conflicts=0)
+                self.lifetimes[key] = session
+            empirical = structural = 0
+            if policy == 'random':
+                rng = random.Random(seed)
+                position = start
+                frames = [dict(position=start, actions=0, label='Initial observation', done=False)]
+                for step in range(12):
+                    if position == goal:
+                        break
+                    position = max(-20, min(20, position + rng.choice(MOVES)))
+                    frames.append(dict(position=position, actions=step + 1, label='Random move', done=False))
+                frames[-1].update(done=True, success=position == goal,
+                                  reason='target' if position == goal else 'action_limit')
+            else:
+                frames, empirical, structural = attempt(
+                    session['model'] if session else build(snapshot), start, goal, seed, learn)
+            if session is not None:
+                session['attempts'] += 1
+                session['empirical_updates'] += empirical
+                session['conflicts'] += structural
+            return dict(start=start, goal=goal, seed=seed, policy=policy, model='agent-z', frames=frames,
+                        lower=-20, upper=20, environment='original', boundary_mode='clamp',
+                        action_policy='external signal interpretation',
+                        sensory_interface='universal-byte', sensory_partitions=snapshot['regions'],
+                        random_expected_success=bounded_random(start, goal, lower=-20, upper=20),
+                        learning=dict(enabled=learn, attempts=session['attempts'] if session else 0,
+                                      empirical_updates=empirical, structural_corrections=structural,
+                                      total_empirical_updates=session['empirical_updates'] if session else 0,
+                                      total_structural_corrections=session['conflicts'] if session else 0))
+
     def attempt(self, data):
         start, goal, seed = (data.get(k) for k in ('start', 'goal', 'seed'))
         if any(type(v) is not int for v in (start, goal, seed)) or not 0 <= seed <= 2**32 - 1:
@@ -332,6 +402,8 @@ class WorkspaceModels:
         if type(data.get('learning', False)) is not bool:
             raise ValueError('Learning must be a boolean')
         kind, snapshot, _ = self.load(data.get('snapshot'))
+        if kind == 'agent-z':
+            return self.z_attempt(data, snapshot)
         saved_environment = snapshot.get('playback_world',snapshot).get('environment','original')
         world_name = data.get('world', saved_environment)
         policy = data.get('policy', 'animal')

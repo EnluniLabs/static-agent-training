@@ -15,7 +15,7 @@ Use `--structure-preset baseline` (the default) for the project baseline seed si
 
 Learning modes are `both`, `empirical`, `structural`, and `off`. Each evolutionary generation ranks agents on the same training tasks and measures its champion on held-out goals. Assessment also reports a frozen score. Within a lifetime, updates carry across episodes. Each evaluation starts from inherited parameters. Evolution selects parents using external task success, mutates inherited parameter rows, and sometimes replaces a seed pair.
 
-The artifact stores the final inherited champion and generation summaries. Agent Z uses the version marker `crt-agent-z-function-first-v1`. Old repertoires encode the reverse orientation and must be redeveloped from seeds to use Agent Z; their transition tables and weights cannot be imported as Agent Z artifacts. This runner provides candidate assessment and does not persist resumable population checkpoints.
+The artifact stores the final inherited champion and generation summaries. Agent Z uses the version marker `crt-agent-z-function-first-v1`. Old repertoires encode the reverse orientation and must be redeveloped from seeds to use Agent Z; their transition tables and weights cannot be imported as Agent Z artifacts. Standalone runs with only `--output` save a final champion. Workspace training also writes resumable population checkpoints and retains each generation’s champion.
 
 ## Signals, rounds, and learning
 
@@ -27,8 +27,19 @@ The adapter alone maps the exact bytes `0x70` through `0x78` to physical moves. 
 
 Empirical learning records the bit mismatches of each sampled expectation and applies the gradient of bitwise negative log likelihood of the observation under the predecessor's original continuation distribution. Structural learning computes a region-local softmax over pairs using the exact sampled expectation, then applies a successor cross-entropy gradient when the successor probability falls below 0.1. The observation is used only for the empirical calculation. Round updates are calculated before changing either parameter table, summed per parameter using sorted contributions and an accurate floating-point sum, and then applied together.
 
-The native CPU backend uses compiled C++ kernels for embedding probabilities, continuation probabilities, and error gradients. Python and native share the scheduler, seeded draws, fixed successor traversal, environment, and update aggregation. The current native backend crosses the Python/C++ boundary per calculation. It is a parity implementation and has no batched evaluator or workspace UI.
+The native CPU backend is the default. One C++ call evaluates an entire agent lifetime across all supplied episodes. C++ handles sensory activation, seeded signal sampling, successor traversal, the number-line action batch and shared measurement, simultaneous learning, and optional trace capture. Python supplies tasks, inherited parameters, initial RNG state, and the adapter's action table. Python also handles lambda development, evolutionary selection and reproduction, and artifact writing. Use `--backend python` for reference parity checks.
 
-## Benchmark
+The native evaluator uses the one-byte number-line protocol above. New environments require their own native adapter. The workspace exposes Agent Z in **Setup**, **Sessions**, **Assessments**, and **Playground**. Workspace training runs on the native CPU and supports stopping, resuming, and extending a session. Each completed generation writes its metrics, champion snapshot, and next population checkpoint. Save Candidates exports the top scoring members of the latest generation. Exports with development seeds can start a new training session with the same region count. A legacy standalone result can be played and assessed using its final champion.
 
-An earlier Agent Z prototype with smaller development budgets produced identical generation metrics and champion data on the WSL development machine. The timings below are historical and do not measure the current baseline preset. Across three runs per backend with the native library built before timing, median evolution and evaluation took **11.89 seconds in Python** and **17.95 seconds with native kernels**. Generation 3 reached **6.19% mean training success** and **5.0% held-out champion success**. This is a small parity benchmark with no evidence yet of a transfer advantage.
+Frozen assessments use saved inherited weights and a shared set of number-line tasks. The playground uses a separate native lifetime, with resettable learning and a brain scan of the saved or current weights. Its stream inspector presents one file byte per frame to an isolated native evaluation. The passive stream records emitted signals and returns no environment feedback.
+
+## Native evaluator benchmark
+
+On WSL, a baseline run with seed 7, 2 generations, 8 agents, and 100 learning episodes per agent took a median of 3.72 seconds with the Python reference and 0.134 seconds with the native evaluator, excluding native compilation. The benchmark ran three times per backend and yielded identical generation metrics and champion data. Longer runs will also include the cost of Python development and reproduction as repertoires grow.
+
+
+## Structural speciation
+
+Enable **Structural speciation** in the Agent Z session setup or pass `--speciation` on the command line. Each species retains its top half by training fitness, rounded down with at least one survivor. Mutated offspring from those survivors refill the remaining slots. Held-out scores are excluded from selection.
+
+Fingerprints use the existing ordered lambda-pair IDs and directed successor links. Unchanged children keep their parent's species. New fingerprints are compared with one fixed representative per species using a Jaccard distance weighted two-thirds toward pairs and one-third toward links. The distance threshold is 0.5. The population starts with at most eight species and leaves slots for later innovations. Total species are capped at 64 or half the population, whichever is smaller, with a minimum cap of one. When the cap is full, new structures join the closest representative. Checkpoints retain representatives and assignments.
